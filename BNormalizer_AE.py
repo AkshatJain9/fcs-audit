@@ -19,14 +19,24 @@ dataset = "/home/akshat/Documents/Data/Plate 19635 _CD8"
 transform = fk.transforms.LogicleTransform('logicle', param_t=262144, param_w=0.5, param_m=4.5, param_a=0)
 
 
+reduce_dims = 2
+
 class BNorm_AE(nn.Module):
     def __init__(self, ch_count):
         super(BNorm_AE, self).__init__()
 
-        self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 1))
-        self.down2 = nn.Linear(in_features=(ch_count - 1), out_features=(ch_count - 2))
-        self.up3 = nn.Linear(in_features=(ch_count - 2), out_features=(ch_count - 1))
-        self.up4 = nn.Linear(in_features=(ch_count - 1), out_features=ch_count)
+        # Remove scatter channels
+        self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
+        self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
+
+        # Real dimensionality reduction of fluoro channels
+        self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims / 2)))
+        self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims / 2)), out_features=(ch_count - 6 - reduce_dims))
+
+        # Build up back to fluoro dimensionality
+        self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (reduce_dims / 2)))
+        self.up2 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims / 2)), out_features=(ch_count - 6))
+        
 
         self.relu = nn.ReLU(inplace=True)
 
@@ -36,10 +46,13 @@ class BNorm_AE(nn.Module):
         x = self.relu(x)
         x = self.down2(x)
         x = self.relu(x)
+        x = self.down3(x)
+        x = self.relu(x)
+        x = self.down4(x)
 
-        y = self.up3(x)
+        y = self.up1(x)
         y = self.relu(y)
-        y = self.up4(y)
+        y = self.up2(y)
         return y
     
 
