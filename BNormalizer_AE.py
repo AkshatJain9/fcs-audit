@@ -15,7 +15,6 @@ fluro_channels += new_channels
 
 all_channels = scatter_channels + fluro_channels
 
-dataset = "/home/akshat/Documents/Data/Plate 19635 _CD8"
 transform = fk.transforms.LogicleTransform('logicle', param_t=262144, param_w=0.5, param_m=4.5, param_a=0)
 
 
@@ -88,7 +87,8 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
         return model
 
 def load_data(panel: str) -> np.ndarray:
-    panel = "/home/akshat/Documents/Data/" + panel + "/"
+    # panel = "/home/akshat/Documents/Data/" + panel + "/"
+    panel = somepath + panel + "\\"
 
     # Recursively search for all .fcs files in the directory and subdirectories
     fcs_files = glob.glob(os.path.join(panel, '**', '*.fcs'), recursive=True)
@@ -127,12 +127,8 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
     ]).T
 
 
-# x = load_data(dataset)
-# print(x.shape)
-
-# /home/akshat/Documents/Data/Plate 19635 _CD8 - 15 channels
-
-somepath = '/home/akshat/Documents/Data/'
+# somepath = '/home/akshat/Documents/Data/'
+somepath = 'C:\\Users\\aksha\\Documents\\ANU\\COMP4550_(Honours)\\Data\\'
 
 # List all directories in the specified path
 directories = [d for d in os.listdir(somepath) if os.path.isdir(os.path.join(somepath, d))]
