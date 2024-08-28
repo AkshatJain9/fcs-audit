@@ -18,98 +18,73 @@ all_channels = scatter_channels + fluro_channels
 transform = fk.transforms.LogicleTransform('logicle', param_t=262144, param_w=0.5, param_m=4.5, param_a=0)
 
 
-reduce_dims = 2
-
-# class BNorm_AE(nn.Module):
-#     def __init__(self, ch_count):
-#         super(BNorm_AE, self).__init__()
-
-#         # Remove scatter channels
-#         self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
-#         self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
-
-#         # Real dimensionality reduction of fluoro channels
-#         self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 2)))
-#         self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6 - reduce_dims))
-
-#         # Build up back to fluoro dimensionality
-#         self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (reduce_dims // 2)))
-#         self.up2 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6))
-        
-
-#         self.relu = nn.ReLU(inplace=True)
-
-
-#     def forward(self, input_data):
-#         x = self.down1(input_data)
-#         x = self.relu(x)
-#         x = self.down2(x)
-#         x = self.relu(x)
-#         x = self.down3(x)
-#         x = self.relu(x)
-#         x = self.down4(x)
-
-#         y = self.up1(x)
-#         y = self.relu(y)
-#         y = self.up2(y)
-#         return y
-    
-
 class BNorm_AE(nn.Module):
-    def __init__(self, ch_count):
+    def __init__(self, ch_count, reduce_dims):
         super(BNorm_AE, self).__init__()
 
-        self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 1))
-        self.down2 = nn.Linear(in_features=(ch_count - 1), out_features=(ch_count - 2))
-        self.up3 = nn.Linear(in_features=(ch_count - 2), out_features=(ch_count - 1))
-        self.up4 = nn.Linear(in_features=(ch_count - 1), out_features=ch_count)
+        # Remove scatter channels
+        self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
+        self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
+
+        # Real dimensionality reduction of fluoro channels
+        self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 2)))
+        self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6 - reduce_dims))
+
+        # Build up back to fluoro dimensionality
+        self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (reduce_dims // 2)))
+        self.up2 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6))
+        
 
         self.relu = nn.ReLU(inplace=True)
-        self.leaky_relu = nn.LeakyReLU(inplace=True)
 
 
     def forward(self, input_data):
         x = self.down1(input_data)
         x = self.relu(x)
         x = self.down2(x)
+        x = self.relu(x)
+        x = self.down3(x)
+        x = self.relu(x)
+        x = self.down4(x)
 
-        y = self.up3(x)
+        y = self.up1(x)
         y = self.relu(y)
-        y = self.up4(y)
+        y = self.up2(y)
         return y
+
+
+def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float) -> np.ndarray:
+    print("##### STARTING TRAINING OF MODEL #####")
+    model.train()
+    criterion_ae = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+    losses = []
     
+    for epoch in range(epoch_count):
+        total_loss = 0.0
+        total_samples = 0
+        for batch in data_loader:
+            x = batch[0]
+            x = x.to(device)
 
+            optimizer.zero_grad()
+            pred_ae = model(x)
 
-def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float) -> nn.Module:
-        print("##### STARTING TRAINING OF MODEL #####")
-        model.train()
-        criterion_ae = nn.MSELoss()
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        model.to(device)
-        
-        for epoch in range(epoch_count):
-            total_loss = 0.0
-            total_samples = 0
-            for batch in data_loader:
-                x = batch[0]
-                x = x.to(device)
+            loss_ae = criterion_ae(pred_ae, x[:, 6:])
+            loss_ae.backward()
+            optimizer.step()
 
-                optimizer.zero_grad()
-                pred_ae = model(x)
+            total_loss += loss_ae.item()
+            total_samples += x.size(0)
 
-                loss_ae = criterion_ae(pred_ae, x)
-                loss_ae.backward()
-                optimizer.step()
-
-                total_loss += loss_ae.item()
-                total_samples += x.size(0)
-
-            avg_loss = total_loss / total_samples
-            print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
-        
-        print("##### FINISHED TRAINING OF MODEL #####")
-        return model
+        avg_loss = total_loss / total_samples
+        losses.append(avg_loss)
+        print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
+    
+    print("##### FINISHED TRAINING OF MODEL #####")
+    return np.array(losses)
 
 def load_data(panel: str) -> np.ndarray:
     panel = "/home/akshat/Documents/Data/" + panel + "/"
@@ -125,6 +100,8 @@ def load_data(panel: str) -> np.ndarray:
     # Load each .fcs file into fk.Sample and print it
     for fcs_file in fcs_files:
         sample = fk.Sample(fcs_file)
+        if "Panel" in panel:
+            sample.apply_compensation("/home/akshat/Documents/281122_Spillover_Matrix.csv")
         # if not printed:
         #     print(sample.pnn_labels)
         #     printed = True
@@ -197,8 +174,9 @@ for directory in directories:
         x = load_data(directory)
         data = get_dataloader(x, 1024)
         print(x.shape)
-        model = BNorm_AE(x.shape[1])
-        model = train_model(model, data, 200, 0.00001)
+        model = BNorm_AE(x.shape[1], 2)
+        losses = train_model(model, data, 1000, 0.0002)
+        np.save(f'losses_{directory}.npy', losses)
 
 
 
