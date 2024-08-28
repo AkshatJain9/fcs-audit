@@ -20,38 +20,62 @@ transform = fk.transforms.LogicleTransform('logicle', param_t=262144, param_w=0.
 
 reduce_dims = 2
 
+# class BNorm_AE(nn.Module):
+#     def __init__(self, ch_count):
+#         super(BNorm_AE, self).__init__()
+
+#         # Remove scatter channels
+#         self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
+#         self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
+
+#         # Real dimensionality reduction of fluoro channels
+#         self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 2)))
+#         self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6 - reduce_dims))
+
+#         # Build up back to fluoro dimensionality
+#         self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (reduce_dims // 2)))
+#         self.up2 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6))
+        
+
+#         self.relu = nn.ReLU(inplace=True)
+
+
+#     def forward(self, input_data):
+#         x = self.down1(input_data)
+#         x = self.relu(x)
+#         x = self.down2(x)
+#         x = self.relu(x)
+#         x = self.down3(x)
+#         x = self.relu(x)
+#         x = self.down4(x)
+
+#         y = self.up1(x)
+#         y = self.relu(y)
+#         y = self.up2(y)
+#         return y
+    
+
 class BNorm_AE(nn.Module):
     def __init__(self, ch_count):
         super(BNorm_AE, self).__init__()
 
-        # Remove scatter channels
-        self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
-        self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
-
-        # Real dimensionality reduction of fluoro channels
-        self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims / 2)))
-        self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims / 2)), out_features=(ch_count - 6 - reduce_dims))
-
-        # Build up back to fluoro dimensionality
-        self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (reduce_dims / 2)))
-        self.up2 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims / 2)), out_features=(ch_count - 6))
-        
+        self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 1))
+        self.down2 = nn.Linear(in_features=(ch_count - 1), out_features=(ch_count - 2))
+        self.up3 = nn.Linear(in_features=(ch_count - 2), out_features=(ch_count - 1))
+        self.up4 = nn.Linear(in_features=(ch_count - 1), out_features=ch_count)
 
         self.relu = nn.ReLU(inplace=True)
+        self.leaky_relu = nn.LeakyReLU(inplace=True)
 
 
     def forward(self, input_data):
         x = self.down1(input_data)
         x = self.relu(x)
         x = self.down2(x)
-        x = self.relu(x)
-        x = self.down3(x)
-        x = self.relu(x)
-        x = self.down4(x)
 
-        y = self.up1(x)
+        y = self.up3(x)
         y = self.relu(y)
-        y = self.up2(y)
+        y = self.up4(y)
         return y
     
 
@@ -62,6 +86,7 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
         criterion_ae = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model.to(device)
         
         for epoch in range(epoch_count):
             total_loss = 0.0
@@ -87,8 +112,8 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
         return model
 
 def load_data(panel: str) -> np.ndarray:
-    # panel = "/home/akshat/Documents/Data/" + panel + "/"
-    panel = somepath + panel + "\\"
+    panel = "/home/akshat/Documents/Data/" + panel + "/"
+    # panel = somepath + panel + "\\"
 
     # Recursively search for all .fcs files in the directory and subdirectories
     fcs_files = glob.glob(os.path.join(panel, '**', '*.fcs'), recursive=True)
@@ -100,15 +125,46 @@ def load_data(panel: str) -> np.ndarray:
     # Load each .fcs file into fk.Sample and print it
     for fcs_file in fcs_files:
         sample = fk.Sample(fcs_file)
-        if not printed:
-            print(sample.pnn_labels)
-            printed = True
+        # if not printed:
+        #     print(sample.pnn_labels)
+        #     printed = True
         sample.apply_transform(transform)
-        fcs_files_np.append(get_np_array_from_sample(sample, subsample=False))
+        fcs_files_np.append(get_np_array_from_sample(sample, subsample=True))
 
     return np.vstack(fcs_files_np)
 
 
+def get_dataloader(data: np.ndarray, batch_size: int) -> torch.utils.data.DataLoader:
+    dataset = torch.utils.data.TensorDataset(torch.tensor(data, dtype=torch.float32))
+    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+def get_channel_source(channel: str) -> str:
+    """ Get the source of the channel
+
+    Args:
+        channel: The channel to get the source of
+
+    Returns:
+        str: The source of the channel
+    """
+
+    if channel in scatter_channels:
+        return 'raw'
+    return 'xform'
+
+def get_factor(channel: str) -> float:
+    """ Get the factor to divide the channel by
+
+    Args:
+        channel: The channel to get the factor for
+
+    Returns:
+        float: The factor to divide the channel by
+    """
+
+    if channel in scatter_channels:
+        return 262144.0
+    return 1.0
 
 def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
     """ Get a np.ndarray from a Sample object
@@ -122,45 +178,33 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
     """
 
     return np.array([
-        sample.get_channel_events(sample.get_channel_index(ch), source='raw', subsample=subsample)
+        sample.get_channel_events(sample.get_channel_index(ch), source=get_channel_source(ch), subsample=subsample) / get_factor(ch)
         for ch in all_channels if ch in sample.pnn_labels
     ]).T
 
 
-# somepath = '/home/akshat/Documents/Data/'
-somepath = 'C:\\Users\\aksha\\Documents\\ANU\\COMP4550_(Honours)\\Data\\'
+somepath = '/home/akshat/Documents/Data/'
+# somepath = 'C:\\Users\\aksha\\Documents\\ANU\\COMP4550_(Honours)\\Data\\'
 
 # List all directories in the specified path
 directories = [d for d in os.listdir(somepath) if os.path.isdir(os.path.join(somepath, d))]
 
 # Print each directory
 for directory in directories:
-    print("-------------------")
-    print("Loading Data for: ", directory)
-    x = load_data(directory)
-    print(f"Loaded {directory} with shape {x.shape}")
-    print("")
+    if directory == 'Panel1':
+        print("-------------------")
+        print("Loading Data for: ", directory)
+        x = load_data(directory)
+        data = get_dataloader(x, 1024)
+        print(x.shape)
+        model = BNorm_AE(x.shape[1])
+        model = train_model(model, data, 200, 0.00001)
 
-    # Determine the number of columns
-    num_cols = x.shape[1]
+
+
+
+
+
     
-    # Create a grid of subplots with num_cols rows and 1 column
-    fig, axes = plt.subplots(num_cols, 1, figsize=(6, 4*num_cols))  # Adjust figure size
-    
-    # Plot histogram for each column in a subplot
-    for i in range(num_cols):
-        axes[i].hist(x[:, i], bins=200, alpha=0.7)
-        axes[i].set_title(f'Column {i+1} Histogram')
-        axes[i].set_xlabel('Value')
-        axes[i].set_ylabel('Frequency')
-    
-    # Adjust layout
-    plt.tight_layout()
-    
-    # Save the figure to the Downloads directory
-    save_path = os.path.join("/home/akshat/Downloads/", f'{directory}.png')
-    plt.savefig(save_path)
-    
-    print(f"Saved figure as {save_path}")
 
 
