@@ -58,6 +58,10 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
     model.train()
     criterion_ae = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    
+    # Add learning rate scheduler
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.2)
+    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     losses = []
@@ -65,26 +69,29 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
     for epoch in range(epoch_count):
         total_loss = 0.0
         total_samples = 0
+        
         for batch in data_loader:
             x = batch[0]
             x = x.to(device)
-
             optimizer.zero_grad()
             pred_ae = model(x)
-
             loss_ae = criterion_ae(pred_ae, x[:, 6:])
             loss_ae.backward()
             optimizer.step()
-
+            
             total_loss += loss_ae.item()
             total_samples += x.size(0)
-
+        
         avg_loss = total_loss / total_samples
         losses.append(avg_loss)
-        print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
+        
+        # Step the scheduler
+        # scheduler.step()
+        
+        print(f'Epoch: {epoch} Loss per unit: {avg_loss} Learning rate: {scheduler.get_last_lr()[0]}')
     
     print("##### FINISHED TRAINING OF MODEL #####")
-    return np.array(losses)
+    return model, np.array(losses)
 
 def load_data(panel: str) -> np.ndarray:
     panel = "/home/akshat/Documents/Data/" + panel + "/"
@@ -166,17 +173,56 @@ somepath = '/home/akshat/Documents/Data/'
 # List all directories in the specified path
 directories = [d for d in os.listdir(somepath) if os.path.isdir(os.path.join(somepath, d))]
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 # Print each directory
 for directory in directories:
-    if directory == 'Panel1':
+    if directory == "Panel1":
+        
         print("-------------------")
         print("Loading Data for: ", directory)
         x = load_data(directory)
         data = get_dataloader(x, 1024)
         print(x.shape)
+        
+
+
         model = BNorm_AE(x.shape[1], 2)
-        losses = train_model(model, data, 1000, 0.0002)
-        np.save(f'losses_{directory}.npy', losses)
+        model, losses = train_model(model, data, 50, 0.0001)
+        # np.save(f'losses_{directory}.npy', losses)
+        # print("Saving Model for: ", directory)
+        # torch.save(model.state_dict(), f'model_{directory}.pt')
+        # model.load_state_dict(torch.load(f'model_{directory}.pt'))
+
+
+        x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
+
+        x_transformed = np.hstack((x[:, :6], x_transformed))
+
+
+        # Determine the number of columns
+        num_cols = x.shape[1]
+        
+        # Create a grid of subplots with num_cols rows and 1 column
+        fig, axes = plt.subplots(num_cols, 1, figsize=(6, 4*num_cols))  # Adjust figure size
+        
+        # Plot histogram for each column in a subplot
+        for i in range(x.shape[1]):
+            axes[i].hist(x[:, i], bins=200, alpha=0.7)
+            axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
+            axes[i].set_title(f'Column {i+1} Histogram')
+            axes[i].set_xlabel('Value')
+            axes[i].set_ylabel('Frequency')
+        
+        # Adjust layout
+        plt.tight_layout()
+        
+        # Save the figure to the Downloads directory
+        # save_path = os.path.join("/home/akshat/Downloads/", f'{directory}.png')
+        # plt.savefig(save_path)
+        plt.show()
+        
+        
 
 
 
