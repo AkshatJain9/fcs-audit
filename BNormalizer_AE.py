@@ -7,7 +7,7 @@ import flowkit as fk
 import glob
 import os
 import matplotlib.pyplot as plt
-from scipy import stats
+import platform
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
 fluro_channels = ['BUV 395-A', 'BUV737-A', 'Pacific Blue-A', 'FITC-A', 'PerCP-Cy5-5-A', 'PE-A', 'PE-Cy7-A', 'APC-A', 'Alexa Fluor 700-A', 'APC-Cy7-A','BV510-A','BV605-A']
@@ -102,8 +102,10 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
     return model, np.array(losses)
 
 def load_data(panel: str) -> np.ndarray:
-    panel = "/home/akshat/Documents/Data/" + panel + "/"
-    # panel = somepath + panel + "\\"
+    if (platform.system() == "Windows"):
+        panel = somepath + panel + "\\"
+    else:
+        panel = somepath + panel + "/"
 
     # Recursively search for all .fcs files in the directory and subdirectories
     fcs_files = glob.glob(os.path.join(panel, '**', '*.fcs'), recursive=True)
@@ -177,8 +179,10 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
     ]).T
 
 
-somepath = '/home/akshat/Documents/Data/'
-# somepath = 'C:\\Users\\aksha\\Documents\\ANU\\COMP4550_(Honours)\\Data\\'
+if (platform.system() == "Windows"):
+    somepath = 'C:\\Users\\aksha\\Documents\\ANU\\COMP4550_(Honours)\\Data\\'
+else:
+    somepath = '/home/akshat/Documents/Data/'
 
 # List all directories in the specified path
 directories = [d for d in os.listdir(somepath) if os.path.isdir(os.path.join(somepath, d))]
@@ -187,51 +191,51 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Print each directory
 for directory in directories:
-    if directory:
+    if directory == "Plate 39630_N":
         
         print("-------------------")
         print("Loading Data for: ", directory)
         x = load_data(directory)
-        data = get_dataloader(x, 1024)
+        # data = get_dataloader(x, 1024)
         print(x.shape)
         
 
-        for num in [4,5,6]:
-            model = BNorm_AE(x.shape[1], num)
-            model, losses = train_model(model, data, 200, 0.0001)
-            np.save(f'{num}/losses_{directory}.npy', losses)
-            print("Saving Model for: ", directory)
-            torch.save(model.state_dict(), f'{num}/model_{directory}.pt')
+        # for num in [4,5,6]:
+        #     model = BNorm_AE(x.shape[1], num)
+        #     model, losses = train_model(model, data, 200, 0.0001)
+        #     np.save(f'{num}/losses_{directory}.npy', losses)
+        #     print("Saving Model for: ", directory)
+        #     torch.save(model.state_dict(), f'{num}/model_{directory}.pt')
 
 
+        model = BNorm_AE(x.shape[1], 6)
+        model.load_state_dict(torch.load(f'6/model_{directory}.pt', map_location=device))
 
-        # model.load_state_dict(torch.load(f'model_{directory}.pt'))
 
+        x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
+        x_transformed = np.hstack((x[:, :6], x_transformed))
 
-        # x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
-        # x_transformed = np.hstack((x[:, :6], x_transformed))
-
-        # # Determine the number of columns
-        # num_cols = x.shape[1]
+        # Determine the number of columns
+        num_cols = x.shape[1]
         
-        # # Create a grid of subplots with num_cols rows and 1 column
-        # fig, axes = plt.subplots(num_cols, 1, figsize=(6, 4*num_cols))  # Adjust figure size
+        # Create a grid of subplots with num_cols rows and 1 column
+        fig, axes = plt.subplots(num_cols, 1, figsize=(6, 4*num_cols))  # Adjust figure size
         
-        # # Plot histogram for each column in a subplot
-        # for i in range(x.shape[1]):
-        #     axes[i].hist(x[:, i], bins=200, alpha=0.7)
-        #     axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
-        #     axes[i].set_title(f'Column {i+1} Histogram')
-        #     axes[i].set_xlabel('Value')
-        #     axes[i].set_ylabel('Frequency')
+        # Plot histogram for each column in a subplot
+        for i in range(x.shape[1]):
+            axes[i].hist(x[:, i], bins=200, alpha=0.7)
+            axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
+            axes[i].set_title(f'Column {i+1} Histogram')
+            axes[i].set_xlabel('Value')
+            axes[i].set_ylabel('Frequency')
         
-        # # Adjust layout
-        # plt.tight_layout()
+        # Adjust layout
+        plt.tight_layout()
         
-        # # Save the figure to the Downloads directory
-        # # save_path = os.path.join("/home/akshat/Downloads/", f'{directory}.png')
-        # # plt.savefig(save_path)
-        # plt.show()
+        # Save the figure to the Downloads directory
+        # save_path = os.path.join("/home/akshat/Downloads/", f'{directory}.png')
+        # plt.savefig(save_path)
+        plt.show()
         
         
 
