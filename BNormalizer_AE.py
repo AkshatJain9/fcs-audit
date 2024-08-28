@@ -7,6 +7,7 @@ import flowkit as fk
 import glob
 import os
 import matplotlib.pyplot as plt
+from scipy import stats
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
 fluro_channels = ['BUV 395-A', 'BUV737-A', 'Pacific Blue-A', 'FITC-A', 'PerCP-Cy5-5-A', 'PE-A', 'PE-Cy7-A', 'APC-A', 'Alexa Fluor 700-A', 'APC-Cy7-A','BV510-A','BV605-A']
@@ -17,6 +18,7 @@ all_channels = scatter_channels + fluro_channels
 
 transform = fk.transforms.LogicleTransform('logicle', param_t=262144, param_w=0.5, param_m=4.5, param_a=0)
 
+p = 0.8
 
 class BNorm_AE(nn.Module):
     def __init__(self, ch_count, reduce_dims):
@@ -53,14 +55,23 @@ class BNorm_AE(nn.Module):
         return y
 
 
+def ks_loss(pred, target):
+    loss = 0
+    for i in range(pred.shape[1]):
+        pred_col = pred[:, i]
+        target_col = target[:, i]
+        # Use a differentiable approximation of KS distance
+        pred_cdf = torch.cumsum(torch.sort(pred_col)[0], dim=0) / pred_col.shape[0]
+        target_cdf = torch.cumsum(torch.sort(target_col)[0], dim=0) / target_col.shape[0]
+        ks_distance = torch.max(torch.abs(pred_cdf - target_cdf))
+        loss += ks_distance
+    return loss / pred.shape[1]  # Average over all columns
+
 def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float) -> np.ndarray:
     print("##### STARTING TRAINING OF MODEL #####")
     model.train()
     criterion_ae = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    
-    # Add learning rate scheduler
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.2)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
@@ -85,10 +96,7 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
         avg_loss = total_loss / total_samples
         losses.append(avg_loss)
         
-        # Step the scheduler
-        # scheduler.step()
-        
-        print(f'Epoch: {epoch} Loss per unit: {avg_loss} Learning rate: {scheduler.get_last_lr()[0]}')
+        print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
     
     print("##### FINISHED TRAINING OF MODEL #####")
     return model, np.array(losses)
@@ -109,6 +117,8 @@ def load_data(panel: str) -> np.ndarray:
         sample = fk.Sample(fcs_file)
         if "Panel" in panel:
             sample.apply_compensation("/home/akshat/Documents/281122_Spillover_Matrix.csv")
+        else:
+            sample.apply_compensation(sample.metadata['spill'])
         # if not printed:
         #     print(sample.pnn_labels)
         #     printed = True
@@ -177,7 +187,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Print each directory
 for directory in directories:
-    if directory == "Panel1":
+    if directory:
         
         print("-------------------")
         print("Loading Data for: ", directory)
@@ -188,39 +198,37 @@ for directory in directories:
 
 
         model = BNorm_AE(x.shape[1], 2)
-        model, losses = train_model(model, data, 50, 0.0001)
-        # np.save(f'losses_{directory}.npy', losses)
-        # print("Saving Model for: ", directory)
-        # torch.save(model.state_dict(), f'model_{directory}.pt')
+        model, losses = train_model(model, data, 200, 0.0001)
+        np.save(f'losses_{directory}.npy', losses)
+        print("Saving Model for: ", directory)
+        torch.save(model.state_dict(), f'model_{directory}.pt')
         # model.load_state_dict(torch.load(f'model_{directory}.pt'))
 
 
-        x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
+        # x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
+        # x_transformed = np.hstack((x[:, :6], x_transformed))
 
-        x_transformed = np.hstack((x[:, :6], x_transformed))
-
-
-        # Determine the number of columns
-        num_cols = x.shape[1]
+        # # Determine the number of columns
+        # num_cols = x.shape[1]
         
-        # Create a grid of subplots with num_cols rows and 1 column
-        fig, axes = plt.subplots(num_cols, 1, figsize=(6, 4*num_cols))  # Adjust figure size
+        # # Create a grid of subplots with num_cols rows and 1 column
+        # fig, axes = plt.subplots(num_cols, 1, figsize=(6, 4*num_cols))  # Adjust figure size
         
-        # Plot histogram for each column in a subplot
-        for i in range(x.shape[1]):
-            axes[i].hist(x[:, i], bins=200, alpha=0.7)
-            axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
-            axes[i].set_title(f'Column {i+1} Histogram')
-            axes[i].set_xlabel('Value')
-            axes[i].set_ylabel('Frequency')
+        # # Plot histogram for each column in a subplot
+        # for i in range(x.shape[1]):
+        #     axes[i].hist(x[:, i], bins=200, alpha=0.7)
+        #     axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
+        #     axes[i].set_title(f'Column {i+1} Histogram')
+        #     axes[i].set_xlabel('Value')
+        #     axes[i].set_ylabel('Frequency')
         
-        # Adjust layout
-        plt.tight_layout()
+        # # Adjust layout
+        # plt.tight_layout()
         
-        # Save the figure to the Downloads directory
-        # save_path = os.path.join("/home/akshat/Downloads/", f'{directory}.png')
-        # plt.savefig(save_path)
-        plt.show()
+        # # Save the figure to the Downloads directory
+        # # save_path = os.path.join("/home/akshat/Downloads/", f'{directory}.png')
+        # # plt.savefig(save_path)
+        # plt.show()
         
         
 
