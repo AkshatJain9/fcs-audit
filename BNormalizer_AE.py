@@ -196,15 +196,15 @@ for directory in directories:
         print(x.shape)
         
 
+        for num in [4,5,6]:
+            model = BNorm_AE(x.shape[1], num)
+            model, losses = train_model(model, data, 200, 0.0001)
+            np.save(f'{num}/losses_{directory}.npy', losses)
+            print("Saving Model for: ", directory)
+            torch.save(model.state_dict(), f'{num}/model_{directory}.pt')
 
-        model = BNorm_AE(x.shape[1], 3)
-        model, losses = train_model(model, data, 200, 0.0001)
-        np.save(f'losses_{directory}.npy', losses)
-        print("Saving Model for: ", directory)
-        torch.save(model.state_dict(), f'model_{directory}.pt')
 
 
-        
         # model.load_state_dict(torch.load(f'model_{directory}.pt'))
 
 
