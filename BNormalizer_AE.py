@@ -197,11 +197,14 @@ for directory in directories:
         
 
 
-        model = BNorm_AE(x.shape[1], 2)
+        model = BNorm_AE(x.shape[1], 3)
         model, losses = train_model(model, data, 200, 0.0001)
         np.save(f'losses_{directory}.npy', losses)
         print("Saving Model for: ", directory)
         torch.save(model.state_dict(), f'model_{directory}.pt')
+
+
+        
         # model.load_state_dict(torch.load(f'model_{directory}.pt'))
 
 
