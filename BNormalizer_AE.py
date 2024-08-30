@@ -20,6 +20,41 @@ transform = fk.transforms.LogicleTransform('logicle', param_t=262144, param_w=0.
 
 p = 0.8
 
+# class BNorm_AE(nn.Module):
+#     def __init__(self, ch_count, reduce_dims):
+#         super(BNorm_AE, self).__init__()
+
+#         # Remove scatter channels
+#         self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
+#         self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
+
+#         # Real dimensionality reduction of fluoro channels
+#         self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 2)))
+#         self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6 - reduce_dims))
+
+#         # Build up back to fluoro dimensionality
+#         self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (reduce_dims // 2)))
+#         self.up2 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6))
+        
+
+#         self.relu = nn.ReLU(inplace=True)
+
+
+#     def forward(self, input_data):
+#         x = self.down1(input_data)
+#         x = self.relu(x)
+#         x = self.down2(x)
+#         x = self.relu(x)
+#         x = self.down3(x)
+#         x = self.relu(x)
+#         x = self.down4(x)
+
+#         y = self.up1(x)
+#         y = self.relu(y)
+#         y = self.up2(y)
+#         return y
+
+
 class BNorm_AE(nn.Module):
     def __init__(self, ch_count, reduce_dims):
         super(BNorm_AE, self).__init__()
@@ -29,13 +64,15 @@ class BNorm_AE(nn.Module):
         self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
 
         # Real dimensionality reduction of fluoro channels
-        self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 2)))
-        self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6 - reduce_dims))
+        self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 3)))
+        self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 3)), out_features=(ch_count - 6 - (2 * reduce_dims // 3)))
+        self.down5 = nn.Linear(in_features=(ch_count - 6 - (2 * reduce_dims // 3)), out_features=(ch_count - 6 - reduce_dims))
 
         # Build up back to fluoro dimensionality
-        self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (reduce_dims // 2)))
-        self.up2 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6))
-        
+
+        self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (2 * reduce_dims // 3)))
+        self.up2 = nn.Linear(in_features=(ch_count - 6 - (2 * reduce_dims // 3)), out_features=(ch_count - 6 - (reduce_dims // 3)))
+        self.up3 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 3)), out_features=(ch_count - 6))
 
         self.relu = nn.ReLU(inplace=True)
 
@@ -48,10 +85,14 @@ class BNorm_AE(nn.Module):
         x = self.down3(x)
         x = self.relu(x)
         x = self.down4(x)
+        x = self.relu(x)
+        x = self.down5(x)
 
         y = self.up1(x)
         y = self.relu(y)
         y = self.up2(y)
+        y = self.relu(y)
+        y = self.up3(y)
         return y
 
 
@@ -113,12 +154,17 @@ def load_data(panel: str) -> np.ndarray:
     fcs_files_np = []
 
     printed = False
+
+    if (platform.system() == "Windows"):
+        spillover = "C:\\Users\\aksha\\Documents\\ANU\\COMP4550_(Honours)\\Spillovers\\281122_Spillover_Matrix.csv"
+    else:
+        spillover = "/home/akshat/Documents/281122_Spillover_Matrix.csv"
     
     # Load each .fcs file into fk.Sample and print it
     for fcs_file in fcs_files:
         sample = fk.Sample(fcs_file)
         if "Panel" in panel:
-            sample.apply_compensation("/home/akshat/Documents/281122_Spillover_Matrix.csv")
+            sample.apply_compensation(spillover)
         else:
             sample.apply_compensation(sample.metadata['spill'])
         # if not printed:
@@ -191,7 +237,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Print each directory
 for directory in directories:
-    if directory == "Plate 39630_N":
+    if directory == "Plate 29178":
         
         print("-------------------")
         print("Loading Data for: ", directory)
@@ -200,16 +246,17 @@ for directory in directories:
         print(x.shape)
         
 
-        # for num in [4,5,6]:
+        # for num in [3,4,5,6]:
         #     model = BNorm_AE(x.shape[1], num)
         #     model, losses = train_model(model, data, 200, 0.0001)
-        #     np.save(f'{num}/losses_{directory}.npy', losses)
+        #     np.save(f'{num}_3/losses_{directory}.npy', losses)
         #     print("Saving Model for: ", directory)
-        #     torch.save(model.state_dict(), f'{num}/model_{directory}.pt')
+        #     torch.save(model.state_dict(), f'{num}_3/model_{directory}.pt')
 
+        nn_shape = 3
 
-        model = BNorm_AE(x.shape[1], 6)
-        model.load_state_dict(torch.load(f'6/model_{directory}.pt', map_location=device))
+        model = BNorm_AE(x.shape[1], nn_shape)
+        model.load_state_dict(torch.load(f'{nn_shape}/model_{directory}.pt', map_location=device))
 
 
         x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
