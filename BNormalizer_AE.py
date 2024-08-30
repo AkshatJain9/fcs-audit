@@ -18,7 +18,12 @@ all_channels = scatter_channels + fluro_channels
 
 transform = fk.transforms.LogicleTransform('logicle', param_t=262144, param_w=0.5, param_m=4.5, param_a=0)
 
-p = 0.8
+if (platform.system() == "Windows"):
+    somepath = 'C:\\Users\\aksha\\Documents\\ANU\\COMP4550_(Honours)\\Data\\'
+else:
+    somepath = '/home/akshat/Documents/Data/'
+directories = [d for d in os.listdir(somepath) if os.path.isdir(os.path.join(somepath, d))]
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # class BNorm_AE(nn.Module):
 #     def __init__(self, ch_count, reduce_dims):
@@ -96,17 +101,55 @@ class BNorm_AE(nn.Module):
         return y
 
 
-def ks_loss(pred, target):
-    loss = 0
-    for i in range(pred.shape[1]):
-        pred_col = pred[:, i]
-        target_col = target[:, i]
-        # Use a differentiable approximation of KS distance
-        pred_cdf = torch.cumsum(torch.sort(pred_col)[0], dim=0) / pred_col.shape[0]
-        target_cdf = torch.cumsum(torch.sort(target_col)[0], dim=0) / target_col.shape[0]
-        ks_distance = torch.max(torch.abs(pred_cdf - target_cdf))
-        loss += ks_distance
-    return loss / pred.shape[1]  # Average over all columns
+class BNorm_AE_with_Attention(nn.Module):
+    def __init__(self, ch_count, reduce_dims):
+        super(BNorm_AE_with_Attention, self).__init__()
+
+        # Encoder
+        self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
+        self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
+        self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 3)))
+        self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 3)), out_features=(ch_count - 6 - (2 * reduce_dims // 3)))
+        self.down5 = nn.Linear(in_features=(ch_count - 6 - (2 * reduce_dims // 3)), out_features=(ch_count - 6 - reduce_dims))
+
+        # Multi-head Attention
+        self.attention = nn.MultiheadAttention(
+            embed_dim=(ch_count - 6 - reduce_dims),
+            num_heads=(ch_count - 6 - reduce_dims),
+            batch_first=True
+        )
+
+        # Decoder
+        self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (2 * reduce_dims // 3)))
+        self.up2 = nn.Linear(in_features=(ch_count - 6 - (2 * reduce_dims // 3)), out_features=(ch_count - 6 - (reduce_dims // 3)))
+        self.up3 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 3)), out_features=(ch_count - 6))
+
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, input_data):
+        # Encoding
+        x = self.relu(self.down1(input_data))
+        x = self.relu(self.down2(x))
+        x = self.relu(self.down3(x))
+        x = self.relu(self.down4(x))
+        x = self.down5(x)
+
+        # Reshape for attention (batch_size, sequence_length, embedding_dim)
+        x = x.unsqueeze(1)
+
+        # Apply attention
+        x, _ = self.attention(x, x, x)
+
+        # Reshape back
+        x = x.squeeze(1)
+
+        # Decoding
+        y = self.relu(self.up1(x))
+        y = self.relu(self.up2(y))
+        y = self.up3(y)
+
+        return y
+
 
 def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float) -> np.ndarray:
     print("##### STARTING TRAINING OF MODEL #####")
@@ -225,64 +268,67 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
     ]).T
 
 
-if (platform.system() == "Windows"):
-    somepath = 'C:\\Users\\aksha\\Documents\\ANU\\COMP4550_(Honours)\\Data\\'
-else:
-    somepath = '/home/akshat/Documents/Data/'
 
-# List all directories in the specified path
-directories = [d for d in os.listdir(somepath) if os.path.isdir(os.path.join(somepath, d))]
+train_models = False
+if train_models:
+    for directory in directories:
+        if directory == "Plate 29178_N":
+            
+            print("-------------------")
+            print("Loading Data for: ", directory)
+            x = load_data(directory)
+            data = get_dataloader(x, 1024)
+            print(x.shape)
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            model = BNorm_AE_with_Attention(x.shape[1], 3)
+            model, losses = train_model(model, data, 50, 0.0001)
+            np.save(f'A_3/losses_{directory}.npy', losses)
+            print("Saving Model for: ", directory)
+            torch.save(model.state_dict(), f'A_3/model_{directory}.pt')
 
-# Print each directory
-for directory in directories:
-    if directory == "Plate 29178":
-        
-        print("-------------------")
-        print("Loading Data for: ", directory)
-        x = load_data(directory)
-        # data = get_dataloader(x, 1024)
-        print(x.shape)
-        
-
-        # for num in [3,4,5,6]:
-        #     model = BNorm_AE(x.shape[1], num)
-        #     model, losses = train_model(model, data, 200, 0.0001)
-        #     np.save(f'{num}_3/losses_{directory}.npy', losses)
-        #     print("Saving Model for: ", directory)
-        #     torch.save(model.state_dict(), f'{num}_3/model_{directory}.pt')
-
-        nn_shape = 3
-
-        model = BNorm_AE(x.shape[1], nn_shape)
-        model.load_state_dict(torch.load(f'{nn_shape}/model_{directory}.pt', map_location=device))
+            # for num in [3,4,5,6]:
+            #     model = BNorm_AE(x.shape[1], num)
+            #     model, losses = train_model(model, data, 200, 0.0001)
+            #     np.save(f'{num}_3/losses_{directory}.npy', losses)
+            #     print("Saving Model for: ", directory)
+            #     torch.save(model.state_dict(), f'{num}_3/model_{directory}.pt')
 
 
-        x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
-        x_transformed = np.hstack((x[:, :6], x_transformed))
 
-        # Determine the number of columns
-        num_cols = x.shape[1]
-        
-        # Create a grid of subplots with num_cols rows and 1 column
-        fig, axes = plt.subplots(num_cols, 1, figsize=(6, 4*num_cols))  # Adjust figure size
-        
-        # Plot histogram for each column in a subplot
-        for i in range(x.shape[1]):
-            axes[i].hist(x[:, i], bins=200, alpha=0.7)
-            axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
-            axes[i].set_title(f'Column {i+1} Histogram')
-            axes[i].set_xlabel('Value')
-            axes[i].set_ylabel('Frequency')
-        
-        # Adjust layout
-        plt.tight_layout()
-        
-        # Save the figure to the Downloads directory
-        # save_path = os.path.join("/home/akshat/Downloads/", f'{directory}.png')
-        # plt.savefig(save_path)
-        plt.show()
+# Graph the losses
+show_result = True
+if show_result:
+    directory = "Plate 29178_N"
+    print("-------------------")
+    print("Loading Data for: ", directory)
+    x = load_data(directory)
+
+    nn_shape = 3
+
+    model = BNorm_AE_with_Attention(x.shape[1], nn_shape)
+    model.load_state_dict(torch.load(f'A_{nn_shape}/model_{directory}.pt', map_location=device))
+
+
+    x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
+    x_transformed = np.hstack((x[:, :6], x_transformed))
+
+    # Determine the number of columns
+    num_cols = x.shape[1]
+
+    # Create a grid of subplots with num_cols rows and 1 column
+    fig, axes = plt.subplots(num_cols, 1, figsize=(6, 4*num_cols))  # Adjust figure size
+
+    # Plot histogram for each column in a subplot
+    for i in range(x.shape[1]):
+        axes[i].hist(x[:, i], bins=200, alpha=0.7)
+        axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
+        axes[i].set_title(f'Column {i+1} Histogram')
+        axes[i].set_xlabel('Value')
+        axes[i].set_ylabel('Frequency')
+
+    # Adjust layout
+    plt.tight_layout()
+    plt.show()
         
         
 
