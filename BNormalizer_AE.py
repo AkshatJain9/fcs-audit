@@ -150,11 +150,70 @@ class BNorm_AE_with_Attention(nn.Module):
 
         return y
 
+class BNorm_VAE(nn.Module):
+    def __init__(self, ch_count, reduce_dims):
+        super(BNorm_VAE, self).__init__()
+
+        # Encoder part
+        self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
+        self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
+        self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 3)))
+        self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 3)), out_features=(ch_count - 6 - (2 * reduce_dims // 3)))
+        self.down5 = nn.Linear(in_features=(ch_count - 6 - (2 * reduce_dims // 3)), out_features=(ch_count - 6 - reduce_dims))
+
+        # Latent space - Mean and Variance
+        self.fc_mu = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - reduce_dims))
+        self.fc_logvar = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - reduce_dims))
+
+        # Decoder part
+        self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (2 * reduce_dims // 3)))
+        self.up2 = nn.Linear(in_features=(ch_count - 6 - (2 * reduce_dims // 3)), out_features=(ch_count - 6 - (reduce_dims // 3)))
+        self.up3 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 3)), out_features=(ch_count - 6))
+
+        self.relu = nn.ReLU(inplace=True)
+
+    def encode(self, input_data):
+        x = self.down1(input_data)
+        x = self.relu(x)
+        x = self.down2(x)
+        x = self.relu(x)
+        x = self.down3(x)
+        x = self.relu(x)
+        x = self.down4(x)
+        x = self.relu(x)
+        x = self.down5(x)
+        
+        # Obtain mean and log variance
+        mu = self.fc_mu(x)
+        log_var = self.fc_logvar(x)
+        return mu, log_var
+
+    def reparameterize(self, mu, log_var):
+        std = torch.exp(0.5 * log_var)  # Standard deviation
+        eps = torch.randn_like(std)     # Random normal variable
+        z = mu + eps * std              # Reparameterization trick
+        return z
+
+    def decode(self, z):
+        y = self.up1(z)
+        y = self.relu(y)
+        y = self.up2(y)
+        y = self.relu(y)
+        y = self.up3(y)
+        return y
+
+    def forward(self, input_data):
+        # Encode input to mean and log variance
+        mu, log_var = self.encode(input_data)
+        # Reparameterize to get latent variable
+        z = self.reparameterize(mu, log_var)
+        # Decode the latent variable
+        reconstructed = self.decode(z)
+        return reconstructed, mu, log_var
 
 def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float) -> np.ndarray:
     print("##### STARTING TRAINING OF MODEL #####")
     model.train()
-    criterion_ae = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -170,7 +229,8 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
             x = x.to(device)
             optimizer.zero_grad()
             pred_ae = model(x)
-            loss_ae = criterion_ae(pred_ae, x[:, 6:])
+            loss_ae = wasserstein_distance(pred_ae, x[:, 6:])
+
             loss_ae.backward()
             optimizer.step()
             
@@ -183,6 +243,126 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
         print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
     
     print("##### FINISHED TRAINING OF MODEL #####")
+    return model, np.array(losses)
+
+
+def wasserstein_distance(pred, target, num_bins=200):
+    # Get the number of columns (features)
+    num_columns = pred.size(1)
+
+    # Compute the Wasserstein distance for each column
+    distances = []
+    for i in range(num_columns):
+        # Get the predicted and target values for the column
+        pred_col = pred[:, i]
+        target_col = target[:, i]
+
+        # Determine the histogram range for the column
+        min_val = min(pred_col.min().item(), target_col.min().item())
+        max_val = max(pred_col.max().item(), target_col.max().item())
+
+        # Compute the histograms for both predicted and target values
+        pred_hist = generate_hist(pred_col, num_bins=num_bins, min_val=float(min_val), max_val=float(max_val))
+        target_hist = generate_hist(target_col, num_bins=num_bins, min_val=float(min_val), max_val=float(max_val))
+
+        # # Normalize the histograms to form probability distributions
+        # pred_hist /= pred_hist.sum()
+        # target_hist /= target_hist.sum()
+
+        # # Compute the cumulative distribution functions (CDFs)
+        # pred_cdf = torch.cumsum(pred_hist, dim=0)
+        # target_cdf = torch.cumsum(target_hist, dim=0)
+
+        # Calculate the Wasserstein distance (Earth Mover's Distance)
+        wasserstein_dist = nn.MSELoss(reduction='sum')(pred_hist, target_hist)
+        distances.append(wasserstein_dist)
+
+    # Compute the mean of the Wasserstein distances across all columns
+    mean_wasserstein_distance = torch.mean(torch.stack(distances))
+
+    return mean_wasserstein_distance
+
+def generate_hist(feature_values, num_bins, min_val, max_val):
+    """
+    Generate a histogram from a tensor of values, in a differentiable manner.
+    
+    Parameters:
+    - feature_values: Tensor of feature values (shape: [N]).
+    - num_bins: Number of bins in the histogram.
+    - min_val: Minimum value in the range of the histogram.
+    - max_val: Maximum value in the range of the histogram.
+
+    Returns:
+    - Tensor representing the histogram (shape: [num_bins]).
+    """
+    bin_centre_offset = (max_val - min_val) / (2 *num_bins)
+    # Define bin centers
+    bin_centers = torch.linspace(min_val + bin_centre_offset, max_val - bin_centre_offset, num_bins)
+
+    # Calculate the bin width
+    bin_width = (max_val - min_val) / num_bins
+    
+    # Compute bin probabilities
+    feature_values_expanded = feature_values.unsqueeze(1)
+
+    bin_centers_expanded = bin_centers.unsqueeze(0)
+    
+    # Softmax-like bin assignment
+    distances = torch.abs(feature_values_expanded - bin_centers_expanded)
+    bin_probs = torch.exp(-distances / (bin_width))
+    
+    # Normalize bin probabilities
+    bin_probs_sum = bin_probs.sum(dim=0)
+    histogram = bin_probs_sum / bin_probs_sum.sum()
+    
+    return histogram
+
+
+
+def train_vae(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float) -> np.ndarray:
+    print("##### STARTING TRAINING OF VAE #####")
+    model.train()
+    criterion_recon = nn.MSELoss(reduction='sum')  # Reconstruction loss
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+    losses = []
+    
+    for epoch in range(epoch_count):
+        total_loss = 0.0
+        total_samples = 0
+        
+        for batch in data_loader:
+            x = batch[0]
+            x = x.to(device)
+            optimizer.zero_grad()
+            
+            # Forward pass through the VAE
+            reconstructed, mu, log_var = model(x)
+
+            # Calculate Reconstruction Loss
+            loss_recon = criterion_recon(reconstructed, x[:, 6:])
+
+            # Calculate KL Divergence Loss
+            # loss_kl = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+
+            # Total VAE Loss = Reconstruction Loss + KL Divergence
+            loss_vae = loss_recon
+
+            # Backpropagation and Optimization
+            loss_vae.backward()
+            optimizer.step()
+            
+            total_loss += loss_vae.item()
+            total_samples += x.size(0)
+        
+        avg_loss = total_loss / total_samples
+        losses.append(avg_loss)
+        
+        print(f'Epoch: {epoch+1}, Loss per unit: {avg_loss:.4f}')
+    
+    print("##### FINISHED TRAINING OF VAE #####")
     return model, np.array(losses)
 
 def load_data(panel: str) -> np.ndarray:
@@ -269,7 +449,7 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 
 
-train_models = False
+train_models = True
 if train_models:
     for directory in directories:
         if directory == "Plate 29178_N":
@@ -280,7 +460,7 @@ if train_models:
             data = get_dataloader(x, 1024)
             print(x.shape)
 
-            model = BNorm_AE_with_Attention(x.shape[1], 3)
+            model = BNorm_AE(x.shape[1], 3)
             model, losses = train_model(model, data, 50, 0.0001)
             np.save(f'A_3/losses_{directory}.npy', losses)
             print("Saving Model for: ", directory)
@@ -305,9 +485,8 @@ if show_result:
 
     nn_shape = 3
 
-    model = BNorm_AE_with_Attention(x.shape[1], nn_shape)
+    model = BNorm_AE(x.shape[1], nn_shape)
     model.load_state_dict(torch.load(f'A_{nn_shape}/model_{directory}.pt', map_location=device))
-
 
     x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
     x_transformed = np.hstack((x[:, :6], x_transformed))
@@ -316,18 +495,24 @@ if show_result:
     num_cols = x.shape[1]
 
     # Create a grid of subplots with num_cols rows and 1 column
-    fig, axes = plt.subplots(num_cols, 1, figsize=(6, 4*num_cols))  # Adjust figure size
+    fig, axes = plt.subplots(num_cols, 1, figsize=(8, 5 * num_cols))  # Increase figure size
 
     # Plot histogram for each column in a subplot
-    for i in range(x.shape[1]):
+    for i in range(6, num_cols):
         axes[i].hist(x[:, i], bins=200, alpha=0.7)
         axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
         axes[i].set_title(f'Column {i+1} Histogram')
         axes[i].set_xlabel('Value')
         axes[i].set_ylabel('Frequency')
 
-    # Adjust layout
-    plt.tight_layout()
+        # Center the plot range around the original data
+        min_val, max_val = np.min(x[:, i]), np.max(x[:, i])
+        axes[i].set_xlim(min_val - 0.1 * abs(max_val - min_val), max_val + 0.1 * abs(max_val - min_val))
+        axes[i].set_ylim(0, 15000)  # Add a bit of padding above
+
+
+    # Adjust layout with more vertical space
+    plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=5.0)  # Increase padding between plots
     plt.show()
         
         
