@@ -25,40 +25,6 @@ else:
 directories = [d for d in os.listdir(somepath) if os.path.isdir(os.path.join(somepath, d))]
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# class BNorm_AE(nn.Module):
-#     def __init__(self, ch_count, reduce_dims):
-#         super(BNorm_AE, self).__init__()
-
-#         # Remove scatter channels
-#         self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
-#         self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
-
-#         # Real dimensionality reduction of fluoro channels
-#         self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 2)))
-#         self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6 - reduce_dims))
-
-#         # Build up back to fluoro dimensionality
-#         self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (reduce_dims // 2)))
-#         self.up2 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 2)), out_features=(ch_count - 6))
-        
-
-#         self.relu = nn.ReLU(inplace=True)
-
-
-#     def forward(self, input_data):
-#         x = self.down1(input_data)
-#         x = self.relu(x)
-#         x = self.down2(x)
-#         x = self.relu(x)
-#         x = self.down3(x)
-#         x = self.relu(x)
-#         x = self.down4(x)
-
-#         y = self.up1(x)
-#         y = self.relu(y)
-#         y = self.up2(y)
-#         return y
-
 
 class BNorm_AE(nn.Module):
     def __init__(self, ch_count, reduce_dims):
@@ -99,117 +65,6 @@ class BNorm_AE(nn.Module):
         y = self.relu(y)
         y = self.up3(y)
         return y
-
-
-class BNorm_AE_with_Attention(nn.Module):
-    def __init__(self, ch_count, reduce_dims):
-        super(BNorm_AE_with_Attention, self).__init__()
-
-        # Encoder
-        self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
-        self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
-        self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 3)))
-        self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 3)), out_features=(ch_count - 6 - (2 * reduce_dims // 3)))
-        self.down5 = nn.Linear(in_features=(ch_count - 6 - (2 * reduce_dims // 3)), out_features=(ch_count - 6 - reduce_dims))
-
-        # Multi-head Attention
-        self.attention = nn.MultiheadAttention(
-            embed_dim=(ch_count - 6 - reduce_dims),
-            num_heads=(ch_count - 6 - reduce_dims),
-            batch_first=True
-        )
-
-        # Decoder
-        self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (2 * reduce_dims // 3)))
-        self.up2 = nn.Linear(in_features=(ch_count - 6 - (2 * reduce_dims // 3)), out_features=(ch_count - 6 - (reduce_dims // 3)))
-        self.up3 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 3)), out_features=(ch_count - 6))
-
-        self.relu = nn.ReLU(inplace=True)
-
-    def forward(self, input_data):
-        # Encoding
-        x = self.relu(self.down1(input_data))
-        x = self.relu(self.down2(x))
-        x = self.relu(self.down3(x))
-        x = self.relu(self.down4(x))
-        x = self.down5(x)
-
-        # Reshape for attention (batch_size, sequence_length, embedding_dim)
-        x = x.unsqueeze(1)
-
-        # Apply attention
-        x, _ = self.attention(x, x, x)
-
-        # Reshape back
-        x = x.squeeze(1)
-
-        # Decoding
-        y = self.relu(self.up1(x))
-        y = self.relu(self.up2(y))
-        y = self.up3(y)
-
-        return y
-
-class BNorm_VAE(nn.Module):
-    def __init__(self, ch_count, reduce_dims):
-        super(BNorm_VAE, self).__init__()
-
-        # Encoder part
-        self.down1 = nn.Linear(in_features=ch_count, out_features=(ch_count - 3))
-        self.down2 = nn.Linear(in_features=(ch_count - 3), out_features=(ch_count - 6))
-        self.down3 = nn.Linear(in_features=(ch_count - 6), out_features=(ch_count - 6 - (reduce_dims // 3)))
-        self.down4 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 3)), out_features=(ch_count - 6 - (2 * reduce_dims // 3)))
-        self.down5 = nn.Linear(in_features=(ch_count - 6 - (2 * reduce_dims // 3)), out_features=(ch_count - 6 - reduce_dims))
-
-        # Latent space - Mean and Variance
-        self.fc_mu = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - reduce_dims))
-        self.fc_logvar = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - reduce_dims))
-
-        # Decoder part
-        self.up1 = nn.Linear(in_features=(ch_count - 6 - reduce_dims), out_features=(ch_count - 6 - (2 * reduce_dims // 3)))
-        self.up2 = nn.Linear(in_features=(ch_count - 6 - (2 * reduce_dims // 3)), out_features=(ch_count - 6 - (reduce_dims // 3)))
-        self.up3 = nn.Linear(in_features=(ch_count - 6 - (reduce_dims // 3)), out_features=(ch_count - 6))
-
-        self.relu = nn.ReLU(inplace=True)
-
-    def encode(self, input_data):
-        x = self.down1(input_data)
-        x = self.relu(x)
-        x = self.down2(x)
-        x = self.relu(x)
-        x = self.down3(x)
-        x = self.relu(x)
-        x = self.down4(x)
-        x = self.relu(x)
-        x = self.down5(x)
-        
-        # Obtain mean and log variance
-        mu = self.fc_mu(x)
-        log_var = self.fc_logvar(x)
-        return mu, log_var
-
-    def reparameterize(self, mu, log_var):
-        std = torch.exp(0.5 * log_var)  # Standard deviation
-        eps = torch.randn_like(std)     # Random normal variable
-        z = mu + eps * std              # Reparameterization trick
-        return z
-
-    def decode(self, z):
-        y = self.up1(z)
-        y = self.relu(y)
-        y = self.up2(y)
-        y = self.relu(y)
-        y = self.up3(y)
-        return y
-
-    def forward(self, input_data):
-        # Encode input to mean and log variance
-        mu, log_var = self.encode(input_data)
-        # Reparameterize to get latent variable
-        z = self.reparameterize(mu, log_var)
-        # Decode the latent variable
-        reconstructed = self.decode(z)
-        return reconstructed, mu, log_var
 
 def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float) -> np.ndarray:
     print("##### STARTING TRAINING OF MODEL #####")
@@ -265,14 +120,6 @@ def wasserstein_distance(pred, target, num_bins=200):
         pred_hist = generate_hist(pred_col, num_bins=num_bins, min_val=float(min_val), max_val=float(max_val))
         target_hist = generate_hist(target_col, num_bins=num_bins, min_val=float(min_val), max_val=float(max_val))
 
-        # # Normalize the histograms to form probability distributions
-        # pred_hist /= pred_hist.sum()
-        # target_hist /= target_hist.sum()
-
-        # # Compute the cumulative distribution functions (CDFs)
-        # pred_cdf = torch.cumsum(pred_hist, dim=0)
-        # target_cdf = torch.cumsum(target_hist, dim=0)
-
         # Calculate the Wasserstein distance (Earth Mover's Distance)
         wasserstein_dist = nn.MSELoss(reduction='sum')(pred_hist, target_hist)
         distances.append(wasserstein_dist)
@@ -318,53 +165,6 @@ def generate_hist(feature_values, num_bins, min_val, max_val):
     return histogram
 
 
-
-def train_vae(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float) -> np.ndarray:
-    print("##### STARTING TRAINING OF VAE #####")
-    model.train()
-    criterion_recon = nn.MSELoss(reduction='sum')  # Reconstruction loss
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model.to(device)
-    losses = []
-    
-    for epoch in range(epoch_count):
-        total_loss = 0.0
-        total_samples = 0
-        
-        for batch in data_loader:
-            x = batch[0]
-            x = x.to(device)
-            optimizer.zero_grad()
-            
-            # Forward pass through the VAE
-            reconstructed, mu, log_var = model(x)
-
-            # Calculate Reconstruction Loss
-            loss_recon = criterion_recon(reconstructed, x[:, 6:])
-
-            # Calculate KL Divergence Loss
-            # loss_kl = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
-
-            # Total VAE Loss = Reconstruction Loss + KL Divergence
-            loss_vae = loss_recon
-
-            # Backpropagation and Optimization
-            loss_vae.backward()
-            optimizer.step()
-            
-            total_loss += loss_vae.item()
-            total_samples += x.size(0)
-        
-        avg_loss = total_loss / total_samples
-        losses.append(avg_loss)
-        
-        print(f'Epoch: {epoch+1}, Loss per unit: {avg_loss:.4f}')
-    
-    print("##### FINISHED TRAINING OF VAE #####")
-    return model, np.array(losses)
-
 def load_data(panel: str) -> np.ndarray:
     if (platform.system() == "Windows"):
         panel = somepath + panel + "\\"
@@ -373,10 +173,7 @@ def load_data(panel: str) -> np.ndarray:
 
     # Recursively search for all .fcs files in the directory and subdirectories
     fcs_files = glob.glob(os.path.join(panel, '**', '*.fcs'), recursive=True)
-
     fcs_files_np = []
-
-    printed = False
 
     if (platform.system() == "Windows"):
         spillover = "C:\\Users\\aksha\\Documents\\ANU\\COMP4550_(Honours)\\Spillovers\\281122_Spillover_Matrix.csv"
@@ -390,9 +187,6 @@ def load_data(panel: str) -> np.ndarray:
             sample.apply_compensation(spillover)
         else:
             sample.apply_compensation(sample.metadata['spill'])
-        # if not printed:
-        #     print(sample.pnn_labels)
-        #     printed = True
         sample.apply_transform(transform)
         fcs_files_np.append(get_np_array_from_sample(sample, subsample=True))
 
@@ -498,7 +292,7 @@ if show_result:
     fig, axes = plt.subplots(num_cols, 1, figsize=(8, 5 * num_cols))  # Increase figure size
 
     # Plot histogram for each column in a subplot
-    for i in range(6, num_cols):
+    for i in range(num_cols):
         axes[i].hist(x[:, i], bins=200, alpha=0.7)
         axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
         axes[i].set_title(f'Column {i+1} Histogram')
@@ -512,7 +306,7 @@ if show_result:
 
 
     # Adjust layout with more vertical space
-    plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=5.0)  # Increase padding between plots
+    plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=10.0)  # Increase padding between plots
     plt.show()
         
         

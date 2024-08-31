@@ -31,7 +31,7 @@ def graph_all_losses(name):
     plt.show()
 
 
-graph_all_losses("Plate 19635")  # Call the function with the desired name
+graph_all_losses("Plate 29178_N")  # Call the function with the desired name
 
 # Plate 19635
 # Plate 27902
