@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-def generate_hist(feature_values, num_bins, min_val, max_val):
+def generate_hist(feature_values, num_bins, min_val, max_val, temperature=0.1):
     """
     Generate a histogram from a tensor of values, in a differentiable manner.
     
@@ -10,6 +10,7 @@ def generate_hist(feature_values, num_bins, min_val, max_val):
     - num_bins: Number of bins in the histogram.
     - min_val: Minimum value in the range of the histogram.
     - max_val: Maximum value in the range of the histogram.
+    - temperature: Controls the sharpness of bin assignment.
 
     Returns:
     - Tensor representing the histogram (shape: [num_bins]).
@@ -26,9 +27,9 @@ def generate_hist(feature_values, num_bins, min_val, max_val):
 
     bin_centers_expanded = bin_centers.unsqueeze(0)
     
-    # Softmax-like bin assignment
+    # Softmax-like bin assignment with temperature
     distances = torch.abs(feature_values_expanded - bin_centers_expanded)
-    bin_probs = torch.exp(-distances / (bin_width))
+    bin_probs = torch.exp(-distances / (bin_width * temperature))
     
     # Normalize bin probabilities
     bin_probs_sum = bin_probs.sum(dim=0)
@@ -36,10 +37,12 @@ def generate_hist(feature_values, num_bins, min_val, max_val):
     
     return histogram
 
+# Example usage
 feature_values = torch.tensor([-0.75, -0.75, 0, 0.75], dtype=torch.float32)
 num_bins = 4
 min_val = -1.0
 max_val = 1.0
+temperature = 0.5  # Smaller value makes the histogram less smooth
 
-histogram = generate_hist(feature_values, num_bins, min_val, max_val)
+histogram = generate_hist(feature_values, num_bins, min_val, max_val, temperature)
 print(histogram)

@@ -66,11 +66,11 @@ class BNorm_AE(nn.Module):
         y = self.up3(y)
         return y
 
-def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float) -> np.ndarray:
+def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float, p: float) -> np.ndarray:
     print("##### STARTING TRAINING OF MODEL #####")
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    
+    mse_loss = nn.MSELoss()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     losses = []
@@ -78,24 +78,38 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
     for epoch in range(epoch_count):
         total_loss = 0.0
         total_samples = 0
+
+        total_mse_loss = 0.0
+        total_wasserstein_loss = 0.0
         
         for batch in data_loader:
             x = batch[0]
             x = x.to(device)
             optimizer.zero_grad()
             pred_ae = model(x)
-            loss_ae = wasserstein_distance(pred_ae, x[:, 6:])
 
+            mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
+            wasserstein_loss = wasserstein_distance(pred_ae, x[:, 6:])
+
+            loss_ae = p * mse_loss_ae + (1 - p) * wasserstein_loss
             loss_ae.backward()
             optimizer.step()
             
             total_loss += loss_ae.item()
             total_samples += x.size(0)
+
+            total_mse_loss += mse_loss_ae.item()
+            total_wasserstein_loss += wasserstein_loss.item()
         
         avg_loss = total_loss / total_samples
+        avg_mse_loss = total_mse_loss / total_samples
+        avg_wasserstein_loss = total_wasserstein_loss / total_samples
         losses.append(avg_loss)
         
         print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
+        print(f'Epoch: {epoch} MSE Loss per unit: {avg_mse_loss}')
+        print(f'Epoch: {epoch} Wasserstein Loss per unit: {avg_wasserstein_loss}')
+        print("--------------------------------------------------")
     
     print("##### FINISHED TRAINING OF MODEL #####")
     return model, np.array(losses)
@@ -156,7 +170,7 @@ def generate_hist(feature_values, num_bins, min_val, max_val):
     
     # Softmax-like bin assignment
     distances = torch.abs(feature_values_expanded - bin_centers_expanded)
-    bin_probs = torch.exp(-distances / (bin_width))
+    bin_probs = torch.exp(-distances / bin_width)
     
     # Normalize bin probabilities
     bin_probs_sum = bin_probs.sum(dim=0)
@@ -243,7 +257,7 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 
 
-train_models = True
+train_models = False
 if train_models:
     for directory in directories:
         if directory == "Plate 29178_N":
@@ -253,12 +267,14 @@ if train_models:
             x = load_data(directory)
             data = get_dataloader(x, 1024)
             print(x.shape)
+            
 
-            model = BNorm_AE(x.shape[1], 3)
-            model, losses = train_model(model, data, 50, 0.0001)
-            np.save(f'A_3/losses_{directory}.npy', losses)
-            print("Saving Model for: ", directory)
-            torch.save(model.state_dict(), f'A_3/model_{directory}.pt')
+            for p in [0.1, 0.3, 0.5, 0.7, 0.9]:
+                model = BNorm_AE(x.shape[1], 3)
+                model, losses = train_model(model, data, 50, 0.0001, p)
+                np.save(f'A_3/losses_{directory}.npy', losses)
+                print("Saving Model for: ", directory)
+                torch.save(model.state_dict(), f'A_3/{p * 10}_model_{directory}.pt')
 
             # for num in [3,4,5,6]:
             #     model = BNorm_AE(x.shape[1], num)
@@ -276,38 +292,74 @@ if show_result:
     print("-------------------")
     print("Loading Data for: ", directory)
     x = load_data(directory)
+    num_cols = x.shape[1]
 
     nn_shape = 3
 
-    model = BNorm_AE(x.shape[1], nn_shape)
-    model.load_state_dict(torch.load(f'A_{nn_shape}/model_{directory}.pt', map_location=device))
+    for p in [0.7]:
+        print("P: ", p)
+        model = BNorm_AE(x.shape[1], nn_shape)
+        model.load_state_dict(torch.load(f'A_{nn_shape}/{p * 10}_model_{directory}.pt', map_location=device))
 
-    x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
-    x_transformed = np.hstack((x[:, :6], x_transformed))
+        x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
+        x_transformed = np.hstack((x[:, :6], x_transformed))
 
-    # Determine the number of columns
-    num_cols = x.shape[1]
+        # mse_loss = nn.MSELoss()
+        # loss = mse_loss(torch.tensor(x_transformed, dtype=torch.float32), torch.tensor(x, dtype=torch.float32))
+        # print("MSE Loss: ", loss.item())
 
-    # Create a grid of subplots with num_cols rows and 1 column
-    fig, axes = plt.subplots(num_cols, 1, figsize=(8, 5 * num_cols))  # Increase figure size
+        # wasserstein_loss = wasserstein_distance(torch.tensor(x_transformed, dtype=torch.float32), torch.tensor(x, dtype=torch.float32))
+        # print("Wasserstein Loss: ", wasserstein_loss.item())
 
-    # Plot histogram for each column in a subplot
-    for i in range(num_cols):
-        axes[i].hist(x[:, i], bins=200, alpha=0.7)
-        axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
-        axes[i].set_title(f'Column {i+1} Histogram')
-        axes[i].set_xlabel('Value')
-        axes[i].set_ylabel('Frequency')
+        # Select two random columns
+        random_cols = np.random.choice(range(6, num_cols), 2, replace=False)
 
-        # Center the plot range around the original data
-        min_val, max_val = np.min(x[:, i]), np.max(x[:, i])
-        axes[i].set_xlim(min_val - 0.1 * abs(max_val - min_val), max_val + 0.1 * abs(max_val - min_val))
-        axes[i].set_ylim(0, 15000)  # Add a bit of padding above
+        # Scatter plot for the original data
+        plt.figure(figsize=(12, 5))
+
+        plt.subplot(1, 2, 1)
+        plt.scatter(x[:, random_cols[0]], x[:, random_cols[1]], alpha=0.5)
+        plt.title(f'Scatter Plot for Original Data (columns {random_cols[0]} vs {random_cols[1]})')
+        plt.xlabel(f'Column {random_cols[0]}')
+        plt.ylabel(f'Column {random_cols[1]}')
+
+        # Scatter plot for the transformed data
+        plt.subplot(1, 2, 2)
+        plt.scatter(x_transformed[:, random_cols[0]], x_transformed[:, random_cols[1]], alpha=0.5)
+        plt.title(f'Scatter Plot for Transformed Data (columns {random_cols[0]} vs {random_cols[1]})')
+        plt.xlabel(f'Column {random_cols[0]}')
+        plt.ylabel(f'Column {random_cols[1]}')
+
+        plt.tight_layout()
+        plt.show()
+
+        assert False
+    
 
 
-    # Adjust layout with more vertical space
-    plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=10.0)  # Increase padding between plots
-    plt.show()
+        # Determine the number of columns
+        num_cols = x.shape[1]
+
+        # Create a grid of subplots with num_cols rows and 1 column
+        fig, axes = plt.subplots(num_cols, 1, figsize=(8, 5 * num_cols))  # Increase figure size
+
+        # Plot histogram for each column in a subplot
+        for i in range(num_cols):
+            axes[i].hist(x[:, i], bins=200, alpha=0.7)
+            axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
+            axes[i].set_title(f'Column {i+1} Histogram')
+            axes[i].set_xlabel('Value')
+            axes[i].set_ylabel('Frequency')
+
+            # Center the plot range around the original data
+            min_val, max_val = np.min(x[:, i]), np.max(x[:, i])
+            axes[i].set_xlim(min_val - 0.1 * abs(max_val - min_val), max_val + 0.1 * abs(max_val - min_val))
+            axes[i].set_ylim(0, 15000)  # Add a bit of padding above
+
+
+        # Adjust layout with more vertical space
+        plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=10.0)  # Increase padding between plots
+        plt.show()
         
         
 
