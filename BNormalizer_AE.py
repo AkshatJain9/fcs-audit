@@ -74,6 +74,8 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     losses = []
+    mse_losses = []
+    wasserstein_losses = []
     
     for epoch in range(epoch_count):
         total_loss = 0.0
@@ -88,10 +90,10 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
             optimizer.zero_grad()
             pred_ae = model(x)
 
-            mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
-            wasserstein_loss = wasserstein_distance(pred_ae, x[:, 6:])
+            mse_loss_ae = p * mse_loss(pred_ae, x[:, 6:])
+            wasserstein_loss = (1 - p) * wasserstein_distance(pred_ae, x[:, 6:])
 
-            loss_ae = p * mse_loss_ae + (1 - p) * wasserstein_loss
+            loss_ae = mse_loss_ae + wasserstein_loss
             loss_ae.backward()
             optimizer.step()
             
@@ -105,6 +107,8 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
         avg_mse_loss = total_mse_loss / total_samples
         avg_wasserstein_loss = total_wasserstein_loss / total_samples
         losses.append(avg_loss)
+        mse_losses.append(avg_mse_loss)
+        wasserstein_losses.append(avg_wasserstein_loss)
         
         print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
         print(f'Epoch: {epoch} MSE Loss per unit: {avg_mse_loss}')
@@ -112,7 +116,7 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
         print("--------------------------------------------------")
     
     print("##### FINISHED TRAINING OF MODEL #####")
-    return model, np.array(losses)
+    return model, np.vstack((losses, mse_losses, wasserstein_losses))
 
 
 def wasserstein_distance(pred, target, num_bins=200):
@@ -123,8 +127,8 @@ def wasserstein_distance(pred, target, num_bins=200):
     distances = []
     for i in range(num_columns):
         # Get the predicted and target values for the column
-        pred_col = pred[:, i]
-        target_col = target[:, i]
+        pred_col = pred[:, i].to(device)
+        target_col = target[:, i].to(device)
 
         # Determine the histogram range for the column
         min_val = min(pred_col.min().item(), target_col.min().item())
@@ -158,7 +162,7 @@ def generate_hist(feature_values, num_bins, min_val, max_val):
     """
     bin_centre_offset = (max_val - min_val) / (2 *num_bins)
     # Define bin centers
-    bin_centers = torch.linspace(min_val + bin_centre_offset, max_val - bin_centre_offset, num_bins)
+    bin_centers = torch.linspace(min_val + bin_centre_offset, max_val - bin_centre_offset, num_bins).to(feature_values.device)
 
     # Calculate the bin width
     bin_width = (max_val - min_val) / num_bins
@@ -257,10 +261,10 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 
 
-train_models = False
+train_models = True
 if train_models:
     for directory in directories:
-        if directory == "Plate 29178_N":
+        if directory:
             
             print("-------------------")
             print("Loading Data for: ", directory)
@@ -271,10 +275,10 @@ if train_models:
 
             for p in [0.1, 0.3, 0.5, 0.7, 0.9]:
                 model = BNorm_AE(x.shape[1], 3)
-                model, losses = train_model(model, data, 50, 0.0001, p)
-                np.save(f'A_3/losses_{directory}.npy', losses)
+                model, losses = train_model(model, data, 200, 0.0001, p)
+                np.save(f'W_3/{p * 10}_losses_{directory}.npy', losses)
                 print("Saving Model for: ", directory)
-                torch.save(model.state_dict(), f'A_3/{p * 10}_model_{directory}.pt')
+                torch.save(model.state_dict(), f'W_3/{p * 10}_model_{directory}.pt')
 
             # for num in [3,4,5,6]:
             #     model = BNorm_AE(x.shape[1], num)
@@ -286,7 +290,7 @@ if train_models:
 
 
 # Graph the losses
-show_result = True
+show_result = False
 if show_result:
     directory = "Plate 29178_N"
     print("-------------------")
