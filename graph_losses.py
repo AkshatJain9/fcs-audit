@@ -37,7 +37,7 @@ def graph_all_mixed_losses(name):
     npy_files = []
     for root, dirs, files in os.walk('.'):
         # Exclude directories with 'W' in their name
-        dirs[:] = [d for d in dirs if 'W' in d]
+        dirs[:] = [d for d in dirs if ('S' in d )]
         for file in files:
             # Check if the file is a .npy file and contains the given name
             if file.endswith('.npy') and name in file:
@@ -68,7 +68,7 @@ def graph_all_mixed_losses(name):
     plt.ylabel('Loss')
     plt.title(f'Loss per unit over epochs for files containing "{name}"')
     plt.legend()  # Add a legend to differentiate the curves
-    plt.ylim(0, 0.00001)  # Set y-axis limits (adjust the values as needed)
+    plt.ylim(0, 0.000004)  # Set y-axis limits (adjust the values as needed)
     plt.tight_layout()  # Adjust the layout to prevent cutting off labels
     plt.show()
     

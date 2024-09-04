@@ -174,7 +174,7 @@ def generate_hist(feature_values, num_bins, min_val, max_val):
     
     # Softmax-like bin assignment
     distances = torch.abs(feature_values_expanded - bin_centers_expanded)
-    bin_probs = torch.exp(-distances / bin_width)
+    bin_probs = torch.exp(-distances / (2 * bin_width))
     
     # Normalize bin probabilities
     bin_probs_sum = bin_probs.sum(dim=0)
@@ -184,13 +184,16 @@ def generate_hist(feature_values, num_bins, min_val, max_val):
 
 
 def load_data(panel: str) -> np.ndarray:
+    if (os.path.exists(somepath + panel + ".npy")):
+        return np.load(somepath + panel + ".npy")
+
     if (platform.system() == "Windows"):
-        panel = somepath + panel + "\\"
+        full_panel = somepath + panel + "\\"
     else:
-        panel = somepath + panel + "/"
+        full_panel = somepath + panel + "/"
 
     # Recursively search for all .fcs files in the directory and subdirectories
-    fcs_files = glob.glob(os.path.join(panel, '**', '*.fcs'), recursive=True)
+    fcs_files = glob.glob(os.path.join(full_panel, '**', '*.fcs'), recursive=True)
     fcs_files_np = []
 
     if (platform.system() == "Windows"):
@@ -201,14 +204,16 @@ def load_data(panel: str) -> np.ndarray:
     # Load each .fcs file into fk.Sample and print it
     for fcs_file in fcs_files:
         sample = fk.Sample(fcs_file)
-        if "Panel" in panel:
+        if "Panel" in full_panel:
             sample.apply_compensation(spillover)
         else:
             sample.apply_compensation(sample.metadata['spill'])
         sample.apply_transform(transform)
         fcs_files_np.append(get_np_array_from_sample(sample, subsample=True))
 
-    return np.vstack(fcs_files_np)
+    res = np.vstack(fcs_files_np)
+    np.save(somepath + panel + ".npy", res)
+    return res
 
 
 def get_dataloader(data: np.ndarray, batch_size: int) -> torch.utils.data.DataLoader:
@@ -262,10 +267,10 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 
 
-train_models = False
+train_models = True
 if train_models:
     for directory in directories:
-        if directory:
+        if "Panel1" in directory:
             
             print("-------------------")
             print("Loading Data for: ", directory)
@@ -274,12 +279,12 @@ if train_models:
             print(x.shape)
             
 
-            for p in [0.1, 0.3, 0.5, 0.7, 0.9]:
+            for p in [0.7]:
                 model = BNorm_AE(x.shape[1], 3)
-                model, losses = train_model(model, data, 200, 0.0001, p)
-                np.save(f'W_3/{p * 10}_losses_{directory}.npy', losses)
+                model, losses = train_model(model, data, 1000, 0.0001, p)
+                np.save(f'S_3/{p * 10}_losses_{directory}.npy', losses)
                 print("Saving Model for: ", directory)
-                torch.save(model.state_dict(), f'W_3/{p * 10}_model_{directory}.pt')
+                torch.save(model.state_dict(), f'S_3/{p * 10}_model_{directory}.pt')
 
             # for num in [3,4,5,6]:
             #     model = BNorm_AE(x.shape[1], num)
@@ -304,7 +309,7 @@ if show_result:
         print("P: ", p)
         # Load the model
         model = BNorm_AE(x.shape[1], nn_shape)
-        model.load_state_dict(torch.load(f'W_{nn_shape}/{p * 10}_model_{directory}.pt', map_location=device))
+        model.load_state_dict(torch.load(f'S_{nn_shape}/{p * 10}_model_{directory}.pt', map_location=device))
         
         # Move the model to the correct device
         model = model.to(device)
@@ -317,6 +322,8 @@ if show_result:
         
         # Concatenate the transformed data with the first 6 columns of the original data
         x_transformed = np.hstack((x[:, :6], x_transformed))
+
+        np.save("transformed_data.npy", x_transformed)
 
         # mse_loss = nn.MSELoss()
         # loss = mse_loss(torch.tensor(x_transformed, dtype=torch.float32), torch.tensor(x, dtype=torch.float32))
