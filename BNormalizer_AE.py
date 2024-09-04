@@ -261,7 +261,8 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 
 
-train_models = True
+
+train_models = False
 if train_models:
     for directory in directories:
         if directory:
@@ -288,11 +289,10 @@ if train_models:
             #     torch.save(model.state_dict(), f'{num}_3/model_{directory}.pt')
 
 
-
 # Graph the losses
-show_result = False
+show_result = True
 if show_result:
-    directory = "Plate 29178_N"
+    directory = "Panel1"
     print("-------------------")
     print("Loading Data for: ", directory)
     x = load_data(directory)
@@ -302,10 +302,20 @@ if show_result:
 
     for p in [0.7]:
         print("P: ", p)
+        # Load the model
         model = BNorm_AE(x.shape[1], nn_shape)
-        model.load_state_dict(torch.load(f'A_{nn_shape}/{p * 10}_model_{directory}.pt', map_location=device))
+        model.load_state_dict(torch.load(f'W_{nn_shape}/{p * 10}_model_{directory}.pt', map_location=device))
+        
+        # Move the model to the correct device
+        model = model.to(device)
 
-        x_transformed = model(torch.tensor(x, dtype=torch.float32).to(device)).cpu().detach().numpy()
+        # Convert the data to a tensor and move it to the same device
+        x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
+        
+        # Transform the data using the model and move it back to the CPU for further processing
+        x_transformed = model(x_tensor).cpu().detach().numpy()
+        
+        # Concatenate the transformed data with the first 6 columns of the original data
         x_transformed = np.hstack((x[:, :6], x_transformed))
 
         # mse_loss = nn.MSELoss()
@@ -316,55 +326,56 @@ if show_result:
         # print("Wasserstein Loss: ", wasserstein_loss.item())
 
         # Select two random columns
-        random_cols = np.random.choice(range(6, num_cols), 2, replace=False)
+        # random_cols = np.random.choice(range(6, num_cols), 2, replace=False)
 
-        # Scatter plot for the original data
-        plt.figure(figsize=(12, 5))
+        # # Scatter plot for the original data
+        # plt.figure(figsize=(12, 5))
 
-        plt.subplot(1, 2, 1)
-        plt.scatter(x[:, random_cols[0]], x[:, random_cols[1]], alpha=0.5)
-        plt.title(f'Scatter Plot for Original Data (columns {random_cols[0]} vs {random_cols[1]})')
-        plt.xlabel(f'Column {random_cols[0]}')
-        plt.ylabel(f'Column {random_cols[1]}')
+        # plt.subplot(1, 2, 1)
+        # plt.scatter(x[:, random_cols[0]], x[:, random_cols[1]], alpha=0.5)
+        # plt.title(f'Scatter Plot for Original Data (columns {random_cols[0]} vs {random_cols[1]})')
+        # plt.xlabel(f'Column {random_cols[0]}')
+        # plt.ylabel(f'Column {random_cols[1]}')
 
-        # Scatter plot for the transformed data
-        plt.subplot(1, 2, 2)
-        plt.scatter(x_transformed[:, random_cols[0]], x_transformed[:, random_cols[1]], alpha=0.5)
-        plt.title(f'Scatter Plot for Transformed Data (columns {random_cols[0]} vs {random_cols[1]})')
-        plt.xlabel(f'Column {random_cols[0]}')
-        plt.ylabel(f'Column {random_cols[1]}')
+        # # Scatter plot for the transformed data
+        # plt.subplot(1, 2, 2)
+        # plt.scatter(x_transformed[:, random_cols[0]], x_transformed[:, random_cols[1]], alpha=0.5)
+        # plt.title(f'Scatter Plot for Transformed Data (columns {random_cols[0]} vs {random_cols[1]})')
+        # plt.xlabel(f'Column {random_cols[0]}')
+        # plt.ylabel(f'Column {random_cols[1]}')
 
-        plt.tight_layout()
-        plt.show()
+        # plt.tight_layout()
+        # plt.show()
 
-        assert False
+        # assert False
     
 
+        # # Determine the number of columns
+        # num_cols = x.shape[1]
 
-        # Determine the number of columns
-        num_cols = x.shape[1]
+        # # Create a grid of subplots with num_cols rows and 1 column
+        # fig, axes = plt.subplots(num_cols, 1, figsize=(8, 5 * num_cols))  # Increase figure size
 
-        # Create a grid of subplots with num_cols rows and 1 column
-        fig, axes = plt.subplots(num_cols, 1, figsize=(8, 5 * num_cols))  # Increase figure size
+        # # Plot histogram for each column in a subplot
+        # for i in range(num_cols):
+        #     axes[i].hist(x[:, i], bins=200, alpha=0.7)
+        #     axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
+        #     axes[i].set_title(f'Column {i+1} Histogram')
+        #     axes[i].set_xlabel('Value')
+        #     axes[i].set_ylabel('Frequency')
 
-        # Plot histogram for each column in a subplot
-        for i in range(num_cols):
-            axes[i].hist(x[:, i], bins=200, alpha=0.7)
-            axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
-            axes[i].set_title(f'Column {i+1} Histogram')
-            axes[i].set_xlabel('Value')
-            axes[i].set_ylabel('Frequency')
-
-            # Center the plot range around the original data
-            min_val, max_val = np.min(x[:, i]), np.max(x[:, i])
-            axes[i].set_xlim(min_val - 0.1 * abs(max_val - min_val), max_val + 0.1 * abs(max_val - min_val))
-            axes[i].set_ylim(0, 15000)  # Add a bit of padding above
+        #     # Center the plot range around the original data
+        #     min_val, max_val = np.min(x[:, i]), np.max(x[:, i])
+        #     axes[i].set_xlim(min_val - 0.1 * abs(max_val - min_val), max_val + 0.1 * abs(max_val - min_val))
+        #     axes[i].set_ylim(0, 15000)  # Add a bit of padding above
 
 
-        # Adjust layout with more vertical space
-        plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=10.0)  # Increase padding between plots
-        plt.show()
+        # # Adjust layout with more vertical space
+        # plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=10.0)  # Increase padding between plots
+        # plt.show()
         
+
+
         
 
 

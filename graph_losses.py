@@ -52,7 +52,6 @@ def graph_all_mixed_losses(name):
         loss_arr = np.load(file)  # Load each .npy file
         label = os.path.basename(os.path.dirname(file))
 
-        
         p_value = float(file.split('/')[2].split("_")[0]) / 10
         
         total_loss = loss_arr[0]
@@ -74,7 +73,7 @@ def graph_all_mixed_losses(name):
     plt.show()
     
 
-graph_all_mixed_losses("19635")  # Call the function with the desired name
+graph_all_mixed_losses("Panel1")  # Call the function with the desired name
 
 # Plate 19635
 # Plate 27902
