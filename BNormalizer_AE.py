@@ -8,6 +8,7 @@ import glob
 import os
 import matplotlib.pyplot as plt
 import platform
+from geomloss import SamplesLoss
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
 fluro_channels = ['BUV 395-A', 'BUV737-A', 'Pacific Blue-A', 'FITC-A', 'PerCP-Cy5-5-A', 'PE-A', 'PE-Cy7-A', 'APC-A', 'Alexa Fluor 700-A', 'APC-Cy7-A','BV510-A','BV605-A']
@@ -71,6 +72,7 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     mse_loss = nn.MSELoss()
+    sinkhorn_distance = SamplesLoss(loss="sinkhorn", p=2, blur=.05)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     losses = []
@@ -91,7 +93,7 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
             pred_ae = model(x)
 
             mse_loss_ae = p * mse_loss(pred_ae, x[:, 6:])
-            wasserstein_loss = (1 - p) * wasserstein_distance(pred_ae, x[:, 6:])
+            wasserstein_loss = (1 - p) * wasserstein_distance(pred_ae, x[:, 6:], sinkhorn_distance)
 
             loss_ae = mse_loss_ae + wasserstein_loss
             loss_ae.backward()
@@ -119,7 +121,19 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
     return model, np.vstack((losses, mse_losses, wasserstein_losses))
 
 
-def wasserstein_distance(pred, target, num_bins=200):
+def custom_mse_loss(pred_hist, target_hist):    
+    # Calculate the difference between the predicted and target histograms
+    diff = target_hist - pred_hist
+    
+    # Create a mask where the penalty is doubled
+    penalty_mask = torch.where(diff > 0, 2.0, 1.0)
+    
+    # Calculate the custom loss
+    loss = torch.sum(penalty_mask * torch.abs(diff))
+    
+    return loss
+
+def wasserstein_distance(pred, target, sinkhorn_distance, num_bins=200):
     # Get the number of columns (features)
     num_columns = pred.size(1)
 
@@ -139,7 +153,10 @@ def wasserstein_distance(pred, target, num_bins=200):
         target_hist = generate_hist(target_col, num_bins=num_bins, min_val=float(min_val), max_val=float(max_val))
 
         # Calculate the Wasserstein distance (Earth Mover's Distance)
-        wasserstein_dist = nn.MSELoss(reduction='sum')(pred_hist, target_hist)
+        # wasserstein_dist = nn.MSELoss(reduction='sum')(pred_hist, target_hist)
+        # wasserstein_dist = nn.L1Loss(reduction='sum')(pred_hist, target_hist)
+        # wasserstein_dist = custom_mse_loss(pred_hist, target_hist)
+        wasserstein_dist = sinkhorn_distance(pred_hist.unsqueeze(0), target_hist.unsqueeze(0))
         distances.append(wasserstein_dist)
 
     # Compute the mean of the Wasserstein distances across all columns
@@ -279,9 +296,9 @@ if train_models:
             print(x.shape)
             
 
-            for p in [0.7]:
+            for p in [0.3]:
                 model = BNorm_AE(x.shape[1], 3)
-                model, losses = train_model(model, data, 1000, 0.0001, p)
+                model, losses = train_model(model, data, 200, 0.0001, p)
                 np.save(f'S_3/{p * 10}_losses_{directory}.npy', losses)
                 print("Saving Model for: ", directory)
                 torch.save(model.state_dict(), f'S_3/{p * 10}_model_{directory}.pt')
@@ -305,7 +322,7 @@ if show_result:
 
     nn_shape = 3
 
-    for p in [0.7]:
+    for p in [0.3]:
         print("P: ", p)
         # Load the model
         model = BNorm_AE(x.shape[1], nn_shape)
