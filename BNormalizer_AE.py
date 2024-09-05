@@ -298,7 +298,7 @@ if train_models:
 
             for p in [0.3]:
                 model = BNorm_AE(x.shape[1], 3)
-                model, losses = train_model(model, data, 200, 0.0001, p)
+                model, losses = train_model(model, data, 1000, 0.0001, p)
                 np.save(f'S_3/{p * 10}_losses_{directory}.npy', losses)
                 print("Saving Model for: ", directory)
                 torch.save(model.state_dict(), f'S_3/{p * 10}_model_{directory}.pt')
