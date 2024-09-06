@@ -66,6 +66,19 @@ class BNorm_AE(nn.Module):
         y = self.relu(y)
         y = self.up3(y)
         return y
+    
+    def encode(self, input_data):
+        with torch.no_grad():
+            x = self.down1(input_data)
+            x = self.relu(x)
+            x = self.down2(x)
+            x = self.relu(x)
+            x = self.down3(x)
+            x = self.relu(x)
+            x = self.down4(x)
+            x = self.relu(x)
+            x = self.down5(x)
+            return x
 
 def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float, p: float) -> np.ndarray:
     print("##### STARTING TRAINING OF MODEL #####")
@@ -284,7 +297,7 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 
 
-train_models = True
+train_models = False
 if train_models:
     for directory in directories:
         if "Panel1" in directory:
@@ -322,7 +335,7 @@ if show_result:
 
     nn_shape = 3
 
-    for p in [0.3]:
+    for p in [0.7]:
         print("P: ", p)
         # Load the model
         model = BNorm_AE(x.shape[1], nn_shape)
