@@ -316,13 +316,6 @@ if train_models:
                 print("Saving Model for: ", directory)
                 torch.save(model.state_dict(), f'S_3/{p * 10}_model_{directory}.pt')
 
-            # for num in [3,4,5,6]:
-            #     model = BNorm_AE(x.shape[1], num)
-            #     model, losses = train_model(model, data, 200, 0.0001)
-            #     np.save(f'{num}_3/losses_{directory}.npy', losses)
-            #     print("Saving Model for: ", directory)
-            #     torch.save(model.state_dict(), f'{num}_3/model_{directory}.pt')
-
 
 # Graph the losses
 show_result = True
@@ -339,7 +332,7 @@ if show_result:
         print("P: ", p)
         # Load the model
         model = BNorm_AE(x.shape[1], nn_shape)
-        model.load_state_dict(torch.load(f'S_{nn_shape}/{p * 10}_model_{directory}.pt', map_location=device))
+        model.load_state_dict(torch.load(f'3_{nn_shape}/model_{directory}.pt', map_location=device))
         
         # Move the model to the correct device
         model = model.to(device)
@@ -354,64 +347,6 @@ if show_result:
         x_transformed = np.hstack((x[:, :6], x_transformed))
 
         np.save("transformed_data.npy", x_transformed)
-
-        # mse_loss = nn.MSELoss()
-        # loss = mse_loss(torch.tensor(x_transformed, dtype=torch.float32), torch.tensor(x, dtype=torch.float32))
-        # print("MSE Loss: ", loss.item())
-
-        # wasserstein_loss = wasserstein_distance(torch.tensor(x_transformed, dtype=torch.float32), torch.tensor(x, dtype=torch.float32))
-        # print("Wasserstein Loss: ", wasserstein_loss.item())
-
-        # Select two random columns
-        # random_cols = np.random.choice(range(6, num_cols), 2, replace=False)
-
-        # # Scatter plot for the original data
-        # plt.figure(figsize=(12, 5))
-
-        # plt.subplot(1, 2, 1)
-        # plt.scatter(x[:, random_cols[0]], x[:, random_cols[1]], alpha=0.5)
-        # plt.title(f'Scatter Plot for Original Data (columns {random_cols[0]} vs {random_cols[1]})')
-        # plt.xlabel(f'Column {random_cols[0]}')
-        # plt.ylabel(f'Column {random_cols[1]}')
-
-        # # Scatter plot for the transformed data
-        # plt.subplot(1, 2, 2)
-        # plt.scatter(x_transformed[:, random_cols[0]], x_transformed[:, random_cols[1]], alpha=0.5)
-        # plt.title(f'Scatter Plot for Transformed Data (columns {random_cols[0]} vs {random_cols[1]})')
-        # plt.xlabel(f'Column {random_cols[0]}')
-        # plt.ylabel(f'Column {random_cols[1]}')
-
-        # plt.tight_layout()
-        # plt.show()
-
-        # assert False
-    
-
-        # # Determine the number of columns
-        # num_cols = x.shape[1]
-
-        # # Create a grid of subplots with num_cols rows and 1 column
-        # fig, axes = plt.subplots(num_cols, 1, figsize=(8, 5 * num_cols))  # Increase figure size
-
-        # # Plot histogram for each column in a subplot
-        # for i in range(num_cols):
-        #     axes[i].hist(x[:, i], bins=200, alpha=0.7)
-        #     axes[i].hist(x_transformed[:, i], bins=200, alpha=0.7, label='Transformed', color='red')
-        #     axes[i].set_title(f'Column {i+1} Histogram')
-        #     axes[i].set_xlabel('Value')
-        #     axes[i].set_ylabel('Frequency')
-
-        #     # Center the plot range around the original data
-        #     min_val, max_val = np.min(x[:, i]), np.max(x[:, i])
-        #     axes[i].set_xlim(min_val - 0.1 * abs(max_val - min_val), max_val + 0.1 * abs(max_val - min_val))
-        #     axes[i].set_ylim(0, 15000)  # Add a bit of padding above
-
-
-        # # Adjust layout with more vertical space
-        # plt.tight_layout(rect=[0, 0, 1, 0.95], h_pad=10.0)  # Increase padding between plots
-        # plt.show()
-        
-
 
         
 
