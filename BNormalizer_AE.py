@@ -6,9 +6,13 @@ import torch.optim as optim
 import flowkit as fk
 import glob
 import os
-import matplotlib.pyplot as plt
 import platform
 from geomloss import SamplesLoss
+import torch.nn.functional as F
+from sklearn.cluster import KMeans
+from sklearn.metrics import mean_squared_error
+from scipy.optimize import linear_sum_assignment
+
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
 fluro_channels = ['BUV 395-A', 'BUV737-A', 'Pacific Blue-A', 'FITC-A', 'PerCP-Cy5-5-A', 'PE-A', 'PE-Cy7-A', 'APC-A', 'Alexa Fluor 700-A', 'APC-Cy7-A','BV510-A','BV605-A']
@@ -79,73 +83,115 @@ class BNorm_AE(nn.Module):
             x = self.relu(x)
             x = self.down5(x)
             return x
+        
 
-def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float, p: float) -> np.ndarray:
+
+
+
+def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float, p: float, cluster_centres) -> np.ndarray:
     print("##### STARTING TRAINING OF MODEL #####")
     model.train()
+    model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Loss Functions
     mse_loss = nn.MSELoss()
     sinkhorn_distance = SamplesLoss(loss="sinkhorn", p=2, blur=.05)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model.to(device)
-    losses = []
+
+    total_losses = []
     mse_losses = []
     wasserstein_losses = []
+    gmm_losses = []
     
     for epoch in range(epoch_count):
         total_loss = 0.0
         total_samples = 0
-
         total_mse_loss = 0.0
         total_wasserstein_loss = 0.0
+        total_gmm_loss = 0.0
         
         for batch in data_loader:
             x = batch[0]
             x = x.to(device)
             optimizer.zero_grad()
+            
+            # Forward pass
             pred_ae = model(x)
-
-            mse_loss_ae = p * mse_loss(pred_ae, x[:, 6:])
-            wasserstein_loss = (1 - p) * wasserstein_distance(pred_ae, x[:, 6:], sinkhorn_distance)
-
-            loss_ae = mse_loss_ae + wasserstein_loss
-            loss_ae.backward()
+            
+            # Calculate MSE and Sinkhorn loss
+            # mse_loss_ae = p * mse_loss(pred_ae, x[:, 6:])
+            # wasserstein_loss = (1 - p) * sinkhorn_distance(pred_ae, x[:, 6:])
+            
+            # Perform GMM clustering on batch latent representations
+            gmm_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, batch[1])
+            
+            # Total loss (including GMM loss)
+            total_loss_ae = gmm_loss
+            total_loss_ae.backward()
             optimizer.step()
             
-            total_loss += loss_ae.item()
+            # Track losses
+            total_loss += total_loss_ae.item()
             total_samples += x.size(0)
-
-            total_mse_loss += mse_loss_ae.item()
-            total_wasserstein_loss += wasserstein_loss.item()
+            # total_mse_loss += mse_loss_ae.item()
+            # total_wasserstein_loss += wasserstein_loss.item()
+            total_gmm_loss += gmm_loss.item()
         
+        # Calculate average losses
         avg_loss = total_loss / total_samples
         avg_mse_loss = total_mse_loss / total_samples
         avg_wasserstein_loss = total_wasserstein_loss / total_samples
-        losses.append(avg_loss)
+        avg_gmm_loss = total_gmm_loss / total_samples
+        
+        # Append losses to lists
+        total_losses.append(avg_loss)
         mse_losses.append(avg_mse_loss)
         wasserstein_losses.append(avg_wasserstein_loss)
+        gmm_losses.append(avg_gmm_loss)
         
         print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
         print(f'Epoch: {epoch} MSE Loss per unit: {avg_mse_loss}')
         print(f'Epoch: {epoch} Wasserstein Loss per unit: {avg_wasserstein_loss}')
+        print(f'Epoch: {epoch} GMM Loss per unit: {avg_gmm_loss}')
         print("--------------------------------------------------")
     
     print("##### FINISHED TRAINING OF MODEL #####")
-    return model, np.vstack((losses, mse_losses, wasserstein_losses))
+    return model, np.vstack((total_losses, mse_losses, wasserstein_losses, gmm_losses))
 
 
-def custom_mse_loss(pred_hist, target_hist):    
-    # Calculate the difference between the predicted and target histograms
-    diff = target_hist - pred_hist
-    
-    # Create a mask where the penalty is doubled
-    penalty_mask = torch.where(diff > 0, 2.0, 1.0)
-    
-    # Calculate the custom loss
-    loss = torch.sum(penalty_mask * torch.abs(diff))
-    
-    return loss
 
+
+def get_main_cell_pops(data, k):
+    kmeans = KMeans(n_clusters=k, random_state=0).fit(data)
+    return kmeans.cluster_centers_, kmeans.labels_
+
+
+def assign_clusters_and_compute_mse(pred_ae, cluster_centers, batch_labels):
+    """
+    Assigns each row in pred_ae to the nearest cluster center and computes the average MSE loss.
+    
+    Args:
+    pred_ae (torch.Tensor): 2D tensor of shape (n_samples, n_features)
+    cluster_centers (torch.Tensor): 2D tensor of shape (n_clusters, n_features)
+    
+    Returns:
+    tuple: (assignments, per_sample_loss, average_loss)
+        - assignments: 1D tensor of cluster assignments for each sample
+        - per_sample_loss: 1D tensor of MSE loss for each sample
+        - average_loss: Scalar tensor of average MSE loss across all samples
+    """
+
+    # Compute the MSE loss for each point to its assigned cluster center
+    assigned_centers = cluster_centers[batch_labels]
+    per_sample_loss = F.mse_loss(pred_ae, assigned_centers, reduction='none').mean(dim=1)
+    
+    # Compute the average loss across all samples
+    average_loss = per_sample_loss.mean()
+    
+    return average_loss
+
+
+##################### SPREAD LOSS #####################
 def wasserstein_distance(pred, target, sinkhorn_distance, num_bins=200):
     # Get the number of columns (features)
     num_columns = pred.size(1)
@@ -213,7 +259,17 @@ def generate_hist(feature_values, num_bins, min_val, max_val):
     return histogram
 
 
+
+##################### UTILITY FUNCTIONS #####################
 def load_data(panel: str) -> np.ndarray:
+    """ Load data from a panel
+    
+    Args:
+        panel: The panel to load data from
+        
+    Returns:
+        np.ndarray: The data from the panel
+    """
     if (os.path.exists(somepath + panel + ".npy")):
         return np.load(somepath + panel + ".npy")
 
@@ -246,8 +302,25 @@ def load_data(panel: str) -> np.ndarray:
     return res
 
 
-def get_dataloader(data: np.ndarray, batch_size: int) -> torch.utils.data.DataLoader:
-    dataset = torch.utils.data.TensorDataset(torch.tensor(data, dtype=torch.float32))
+def get_dataloader(data: np.ndarray, labels: np.ndarray, batch_size: int) -> torch.utils.data.DataLoader:
+    """ Get a DataLoader from a np.ndarray and corresponding labels
+    
+    Args:
+        data: The np.ndarray containing the data
+        labels: The np.ndarray containing the labels corresponding to the data
+        batch_size: The batch size to use
+        
+    Returns:
+        torch.utils.data.DataLoader: The DataLoader representation of the np.ndarray and labels    
+    """
+    # Convert data and labels to tensors
+    data_tensor = torch.tensor(data, dtype=torch.float32)
+    labels_tensor = torch.tensor(labels, dtype=torch.long)  # Use long dtype for classification labels
+    
+    # Create a dataset that contains both the data and the labels
+    dataset = torch.utils.data.TensorDataset(data_tensor, labels_tensor)
+    
+    # Return the DataLoader with the dataset, shuffling both data and labels together
     return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 def get_channel_source(channel: str) -> str:
@@ -295,58 +368,50 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
     ]).T
 
 
+##################### MAIN #####################
+if __name__ == "__main__":
+    train_models = False
+    show_result = True
+    batches_to_run = ["Panel1"]
+    p_values = None
+    folder_path = "G_3"
 
 
-train_models = False
-if train_models:
-    for directory in directories:
-        if "Panel1" in directory:
-            
-            print("-------------------")
-            print("Loading Data for: ", directory)
-            x = load_data(directory)
-            data = get_dataloader(x, 1024)
-            print(x.shape)
-            
+    if train_models:
+        for directory in directories:
+            if directory in batches_to_run:
+                print(f"-------- TRAINING FOR {directory} -----------")
+   
+                x = load_data(directory)
+                ref_centres, ref_labels = get_main_cell_pops(x[:, 6:], 7)
+                cluster_centres = torch.tensor(ref_centres, dtype=torch.float32).to(device)
 
-            for p in [0.3]:
+                data = get_dataloader(x, ref_labels, 1024)
+
                 model = BNorm_AE(x.shape[1], 3)
-                model, losses = train_model(model, data, 1000, 0.0001, p)
-                np.save(f'S_3/{p * 10}_losses_{directory}.npy', losses)
-                print("Saving Model for: ", directory)
-                torch.save(model.state_dict(), f'S_3/{p * 10}_model_{directory}.pt')
+                model, losses = train_model(model, data, 200, 0.0001, 0.7, cluster_centres)
+                np.save(f'{folder_path}/losses_{directory}.npy', losses)
+                torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
+                print(f"-------- FINISHED TRAINING FOR {directory} -----------")
+            
 
+    if show_result:
+        for directory in directories:
+            if directory in batches_to_run:
+                print(f"-------- COMPUTING RESULTS FOR {directory} -----------")
+                x = load_data(directory)
+                num_cols = x.shape[1]
 
-# Graph the losses
-show_result = True
-if show_result:
-    directory = "Panel1"
-    print("-------------------")
-    print("Loading Data for: ", directory)
-    x = load_data(directory)
-    num_cols = x.shape[1]
+                model = BNorm_AE(x.shape[1], 3)
+                model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device))
+                model = model.to(device)
 
-    nn_shape = 3
+                x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
+                x_transformed = model(x_tensor).cpu().detach().numpy()  
+                x_transformed = np.hstack((x[:, :6], x_transformed))
 
-    for p in [0.7]:
-        print("P: ", p)
-        # Load the model
-        model = BNorm_AE(x.shape[1], nn_shape)
-        model.load_state_dict(torch.load(f'3_{nn_shape}/model_{directory}.pt', map_location=device))
-        
-        # Move the model to the correct device
-        model = model.to(device)
-
-        # Convert the data to a tensor and move it to the same device
-        x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
-        
-        # Transform the data using the model and move it back to the CPU for further processing
-        x_transformed = model(x_tensor).cpu().detach().numpy()
-        
-        # Concatenate the transformed data with the first 6 columns of the original data
-        x_transformed = np.hstack((x[:, :6], x_transformed))
-
-        np.save("transformed_data.npy", x_transformed)
+                np.save(f'./{directory}_x.npy', x_transformed)
+                print(f"-------- FINISHED SHOWING RESULTS FOR {directory} -----------")
 
         
 
