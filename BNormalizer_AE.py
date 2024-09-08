@@ -8,10 +8,7 @@ import glob
 import os
 import platform
 from geomloss import SamplesLoss
-import torch.nn.functional as F
-from sklearn.cluster import KMeans
-from sklearn.metrics import mean_squared_error
-from scipy.optimize import linear_sum_assignment
+from sklearn.mixture import GaussianMixture
 
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
@@ -88,7 +85,13 @@ class BNorm_AE(nn.Module):
 
 
 
-def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoch_count: int, learning_rate: float, p: float, cluster_centres) -> np.ndarray:
+def train_model(model: nn.Module, 
+                data_loader: torch.utils.data.DataLoader, 
+                epoch_count: int, 
+                learning_rate: float, 
+                p: float, 
+                cluster_centres: torch.Tensor, 
+                cluster_cov: torch.Tensor) -> np.ndarray:
     print("##### STARTING TRAINING OF MODEL #####")
     model.train()
     model.to(device)
@@ -123,7 +126,7 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
             # wasserstein_loss = (1 - p) * sinkhorn_distance(pred_ae, x[:, 6:])
             
             # Perform GMM clustering on batch latent representations
-            gmm_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, batch[1])
+            gmm_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
             
             # Total loss (including GMM loss)
             total_loss_ae = gmm_loss
@@ -160,13 +163,13 @@ def train_model(model: nn.Module, data_loader: torch.utils.data.DataLoader, epoc
 
 
 
-
+##################### CLUSTER LOSS #####################
 def get_main_cell_pops(data, k):
-    kmeans = KMeans(n_clusters=k, random_state=0).fit(data)
-    return kmeans.cluster_centers_, kmeans.labels_
+    gmm = GaussianMixture(n_components=k, random_state=0).fit(data)
+    return gmm.means_, gmm.covariances_, gmm.predict(data)
 
 
-def assign_clusters_and_compute_mse(pred_ae, cluster_centers, batch_labels):
+def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batch_labels):
     """
     Assigns each row in pred_ae to the nearest cluster center and computes the average MSE loss.
     
@@ -183,12 +186,14 @@ def assign_clusters_and_compute_mse(pred_ae, cluster_centers, batch_labels):
 
     # Compute the MSE loss for each point to its assigned cluster center
     assigned_centers = cluster_centers[batch_labels]
-    per_sample_loss = F.mse_loss(pred_ae, assigned_centers, reduction='none').mean(dim=1)
+    assigned_covs = cluster_covs[batch_labels]
+
+    diff = pred_ae - assigned_centers
+    inv_cov = torch.inverse(assigned_covs)
+
+    mahalanobis_distance = torch.einsum('bi,bij,bj->b', diff, inv_cov, diff)
     
-    # Compute the average loss across all samples
-    average_loss = per_sample_loss.mean()
-    
-    return average_loss
+    return mahalanobis_distance.mean()
 
 
 ##################### SPREAD LOSS #####################
@@ -213,8 +218,6 @@ def wasserstein_distance(pred, target, sinkhorn_distance, num_bins=200):
 
         # Calculate the Wasserstein distance (Earth Mover's Distance)
         # wasserstein_dist = nn.MSELoss(reduction='sum')(pred_hist, target_hist)
-        # wasserstein_dist = nn.L1Loss(reduction='sum')(pred_hist, target_hist)
-        # wasserstein_dist = custom_mse_loss(pred_hist, target_hist)
         wasserstein_dist = sinkhorn_distance(pred_hist.unsqueeze(0), target_hist.unsqueeze(0))
         distances.append(wasserstein_dist)
 
@@ -370,7 +373,7 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 ##################### MAIN #####################
 if __name__ == "__main__":
-    train_models = False
+    train_models = True
     show_result = True
     batches_to_run = ["Panel1"]
     p_values = None
@@ -383,13 +386,14 @@ if __name__ == "__main__":
                 print(f"-------- TRAINING FOR {directory} -----------")
    
                 x = load_data(directory)
-                ref_centres, ref_labels = get_main_cell_pops(x[:, 6:], 7)
+                ref_centres, ref_cov, ref_labels = get_main_cell_pops(x[:, 6:], 7)
                 cluster_centres = torch.tensor(ref_centres, dtype=torch.float32).to(device)
+                cluseter_cov = torch.tensor(ref_cov, dtype=torch.float32).to(device)
 
                 data = get_dataloader(x, ref_labels, 1024)
 
                 model = BNorm_AE(x.shape[1], 3)
-                model, losses = train_model(model, data, 200, 0.0001, 0.7, cluster_centres)
+                model, losses = train_model(model, data, 200, 0.0001, 0.7, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
