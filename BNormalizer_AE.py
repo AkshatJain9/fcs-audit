@@ -9,6 +9,7 @@ import os
 import platform
 from geomloss import SamplesLoss
 from sklearn.mixture import GaussianMixture
+import matplotlib.pyplot as plt
 
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
@@ -168,6 +169,14 @@ def get_main_cell_pops(data, k):
     gmm = GaussianMixture(n_components=k, random_state=0).fit(data)
     return gmm.means_, gmm.covariances_, gmm.predict(data)
 
+def kl_divergence(cov1, cov2):
+    n = cov1.shape[0]
+    logdet_cov2 = torch.logdet(cov2)
+    logdet_cov1 = torch.logdet(cov1)
+    inv_cov2 = torch.inverse(cov2)
+    trace_term = torch.trace(torch.matmul(inv_cov2, cov1))
+    return 0.5 * (trace_term + logdet_cov2 - logdet_cov1 - n)
+
 
 def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batch_labels):
     """
@@ -188,13 +197,25 @@ def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batc
     assigned_centers = cluster_centers[batch_labels]
     assigned_covs = cluster_covs[batch_labels]
 
-    diff = pred_ae - assigned_centers
-    inv_cov = torch.inverse(assigned_covs)
+    diff = (pred_ae - assigned_centers) ** 2
+    mse_diff = torch.mean(diff, dim=1)
+    # inv_cov = torch.inverse(assigned_covs)
 
-    mahalanobis_distance = torch.einsum('bi,bij,bj->b', diff, inv_cov, diff)
+    # mahalanobis_distance = torch.einsum('bi,bij,bj->b', diff, inv_cov, diff)
+
+    empirical_cov_loss = 0.0
+    for label in range(cluster_centers.size(0)):
+        # Select the points in the batch that belong to this cluster
+        cluster_points = pred_ae[batch_labels == label]
+        centered_points = cluster_points - cluster_points.mean(dim=0, keepdim=True)
+        empirical_cov = torch.matmul(centered_points.T, centered_points) / (cluster_points.size(0) - 1)
+        empirical_cov += 1e-6 * torch.eye(empirical_cov.size(0)).to(empirical_cov.device)
+        empirical_cov_loss += kl_divergence(empirical_cov, cluster_covs[label])
     
-    return mahalanobis_distance.mean()
+    # Combine Mahalanobis distance and variance preservation term into the loss
+    total_loss = mse_diff.mean() + empirical_cov_loss
 
+    return total_loss
 
 ##################### SPREAD LOSS #####################
 def wasserstein_distance(pred, target, sinkhorn_distance, num_bins=200):
@@ -390,7 +411,7 @@ if __name__ == "__main__":
                 cluster_centres = torch.tensor(ref_centres, dtype=torch.float32).to(device)
                 cluseter_cov = torch.tensor(ref_cov, dtype=torch.float32).to(device)
 
-                data = get_dataloader(x, ref_labels, 1024)
+                data = get_dataloader(x, ref_labels, 2048)
 
                 model = BNorm_AE(x.shape[1], 3)
                 model, losses = train_model(model, data, 200, 0.0001, 0.7, cluster_centres, cluseter_cov)
