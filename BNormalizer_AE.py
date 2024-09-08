@@ -83,9 +83,6 @@ class BNorm_AE(nn.Module):
             return x
         
 
-
-
-
 def train_model(model: nn.Module, 
                 data_loader: torch.utils.data.DataLoader, 
                 epoch_count: int, 
@@ -104,15 +101,15 @@ def train_model(model: nn.Module,
 
     total_losses = []
     mse_losses = []
-    wasserstein_losses = []
-    gmm_losses = []
+    tvd_losses = []
+    cluster_align_losses = []
     
     for epoch in range(epoch_count):
         total_loss = 0.0
         total_samples = 0
         total_mse_loss = 0.0
-        total_wasserstein_loss = 0.0
-        total_gmm_loss = 0.0
+        total_tvd_loss = 0.0
+        total_cluster_align_loss = 0.0
         
         for batch in data_loader:
             x = batch[0]
@@ -123,44 +120,42 @@ def train_model(model: nn.Module,
             pred_ae = model(x)
             
             # Calculate MSE and Sinkhorn loss
-            # mse_loss_ae = p * mse_loss(pred_ae, x[:, 6:])
-            # wasserstein_loss = (1 - p) * sinkhorn_distance(pred_ae, x[:, 6:])
-            
-            # Perform GMM clustering on batch latent representations
-            gmm_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
+            mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
+            wasserstein_loss = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
+            cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, x[:, 6:], cluster_centres, cluster_cov, batch[1])
             
             # Total loss (including GMM loss)
-            total_loss_ae = gmm_loss
+            total_loss_ae = mse_loss_ae + wasserstein_loss + cluster_align_loss
             total_loss_ae.backward()
             optimizer.step()
             
             # Track losses
             total_loss += total_loss_ae.item()
             total_samples += x.size(0)
-            # total_mse_loss += mse_loss_ae.item()
-            # total_wasserstein_loss += wasserstein_loss.item()
-            total_gmm_loss += gmm_loss.item()
+            total_mse_loss += mse_loss_ae.item()
+            total_tvd_loss += wasserstein_loss.item()
+            total_cluster_align_loss += cluster_align_loss.item()
         
         # Calculate average losses
         avg_loss = total_loss / total_samples
         avg_mse_loss = total_mse_loss / total_samples
-        avg_wasserstein_loss = total_wasserstein_loss / total_samples
-        avg_gmm_loss = total_gmm_loss / total_samples
+        avg_tvd_loss = total_tvd_loss / total_samples
+        avg_cluster_align_loss = total_cluster_align_loss / total_samples
         
         # Append losses to lists
         total_losses.append(avg_loss)
         mse_losses.append(avg_mse_loss)
-        wasserstein_losses.append(avg_wasserstein_loss)
-        gmm_losses.append(avg_gmm_loss)
+        tvd_losses.append(avg_tvd_loss)
+        cluster_align_losses.append(avg_cluster_align_loss)
         
         print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
         print(f'Epoch: {epoch} MSE Loss per unit: {avg_mse_loss}')
-        print(f'Epoch: {epoch} Wasserstein Loss per unit: {avg_wasserstein_loss}')
-        print(f'Epoch: {epoch} GMM Loss per unit: {avg_gmm_loss}')
+        print(f'Epoch: {epoch} TVD Loss per unit: {avg_tvd_loss}')
+        print(f'Epoch: {epoch} Cluster Alignment Loss per unit: {avg_cluster_align_loss}')
         print("--------------------------------------------------")
     
     print("##### FINISHED TRAINING OF MODEL #####")
-    return model, np.vstack((total_losses, mse_losses, wasserstein_losses, gmm_losses))
+    return model, np.vstack((total_losses, mse_losses, tvd_losses, cluster_align_losses))
 
 
 
@@ -169,16 +164,39 @@ def get_main_cell_pops(data, k):
     gmm = GaussianMixture(n_components=k, random_state=0).fit(data)
     return gmm.means_, gmm.covariances_, gmm.predict(data)
 
-def kl_divergence(cov1, cov2):
-    n = cov1.shape[0]
-    logdet_cov2 = torch.logdet(cov2)
-    logdet_cov1 = torch.logdet(cov1)
-    inv_cov2 = torch.inverse(cov2)
-    trace_term = torch.trace(torch.matmul(inv_cov2, cov1))
-    return 0.5 * (trace_term + logdet_cov2 - logdet_cov1 - n)
+
+def compute_mahalanobis_values(data, cluster_centers, cluster_covs, batch_labels):
+    """
+    Compute the Mahalanobis distance between each point in the batch and the cluster center it is assigned to.
+    
+    Args:
+    data (torch.Tensor): 2D tensor of shape (n_samples, n_features)
+    cluster_centers (torch.Tensor): 2D tensor of shape (n_clusters, n_features)
+    cluster_covs (torch.Tensor): 3D tensor of shape (n_clusters, n_features, n_features)
+    batch_labels (torch.Tensor): 1D tensor of cluster assignments for each sample
+    
+    Returns:
+    tuple: (mahalanobis_distances, histograms)
+        - mahalanobis_distances: 1D tensor of Mahalanobis distances for each sample
+        - histograms: 2D tensor of histograms for each cluster
+    """
+    # Compute the Mahalanobis distance for each point to its assigned cluster center
+    assigned_centers = cluster_centers[batch_labels]
+    assigned_covs = cluster_covs[batch_labels]
+    diff = data - assigned_centers
+    inv_cov = torch.inverse(assigned_covs)
+    mahalanobis_distances = torch.einsum('bi,bij,bj->b', diff, inv_cov, diff)
+    
+    # Compute histograms for each cluster
+    mahalanobis_values = []
+    for label in range(cluster_centers.size(0)):
+        cluster_samples = mahalanobis_distances[batch_labels == label]
+        mahalanobis_values.append(cluster_samples)
+    
+    return mahalanobis_values
 
 
-def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batch_labels):
+def assign_clusters_and_compute_mse(pred_ae, x, cluster_centers, cluster_covs, batch_labels):
     """
     Assigns each row in pred_ae to the nearest cluster center and computes the average MSE loss.
     
@@ -195,30 +213,28 @@ def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batc
 
     # Compute the MSE loss for each point to its assigned cluster center
     assigned_centers = cluster_centers[batch_labels]
-    assigned_covs = cluster_covs[batch_labels]
+    # assigned_covs = cluster_covs[batch_labels]
 
     diff = (pred_ae - assigned_centers) ** 2
     mse_diff = torch.mean(diff, dim=1)
-    # inv_cov = torch.inverse(assigned_covs)
-
-    # mahalanobis_distance = torch.einsum('bi,bij,bj->b', diff, inv_cov, diff)
-
-    empirical_cov_loss = 0.0
-    for label in range(cluster_centers.size(0)):
-        # Select the points in the batch that belong to this cluster
-        cluster_points = pred_ae[batch_labels == label]
-        centered_points = cluster_points - cluster_points.mean(dim=0, keepdim=True)
-        empirical_cov = torch.matmul(centered_points.T, centered_points) / (cluster_points.size(0) - 1)
-        empirical_cov += 1e-6 * torch.eye(empirical_cov.size(0)).to(empirical_cov.device)
-        empirical_cov_loss += kl_divergence(empirical_cov, cluster_covs[label])
     
-    # Combine Mahalanobis distance and variance preservation term into the loss
-    total_loss = mse_diff.mean() + empirical_cov_loss
+    # pred_mahalanobis = compute_mahalanobis_values(pred_ae, cluster_centers, cluster_covs, batch_labels)
+    # x_mahalanobis = compute_mahalanobis_values(x, cluster_centers, cluster_covs, batch_labels)
 
+    # mahalanobis_mse = []
+    # for (pred_m, x_m) in zip(pred_mahalanobis, x_mahalanobis):
+    #     max_val = max(pred_m.max(), x_m.max())
+    #     pred_m_hist = generate_hist(pred_m, num_bins=50, min_val=0, max_val=max_val)
+    #     x_m_hist = generate_hist(x_m, num_bins=50, min_val=0, max_val=max_val)
+    #     mahalanobis_mse.append(nn.MSELoss(reduction='sum')(pred_m_hist, x_m_hist))
+
+    # total_loss = mse_diff.mean() + torch.mean(torch.stack(mahalanobis_mse))
+
+    total_loss = mse_diff.mean()
     return total_loss
 
 ##################### SPREAD LOSS #####################
-def wasserstein_distance(pred, target, sinkhorn_distance, num_bins=200):
+def tvd_loss(pred, target, sinkhorn_distance, num_bins=200):
     # Get the number of columns (features)
     num_columns = pred.size(1)
 
@@ -414,7 +430,7 @@ if __name__ == "__main__":
                 data = get_dataloader(x, ref_labels, 2048)
 
                 model = BNorm_AE(x.shape[1], 3)
-                model, losses = train_model(model, data, 200, 0.0001, 0.7, cluster_centres, cluseter_cov)
+                model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
