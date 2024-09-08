@@ -430,7 +430,7 @@ if __name__ == "__main__":
                 data = get_dataloader(x, ref_labels, 2048)
 
                 model = BNorm_AE(x.shape[1], 3)
-                model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
+                model, losses = train_model(model, data, 2000, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
