@@ -9,7 +9,7 @@ def graph_all_losses(name):
     # Walk through current directory and subdirectories
     for root, dirs, files in os.walk('.'):
         # Exclude directories with 'W' in their name
-        dirs[:] = [d for d in dirs if 'W' not in d]
+        dirs[:] = [d for d in dirs if 'G' in d]
         for file in files:
             # Check if the file is a .npy file and contains the given name
             if file.endswith('.npy') and name in file:
@@ -38,7 +38,7 @@ def graph_all_mixed_losses(name):
     npy_files = []
     for root, dirs, files in os.walk('.'):
         # Exclude directories with 'W' in their name
-        dirs[:] = [d for d in dirs]
+        dirs[:] = [d for d in dirs if 'G' in d]
         for file in files:
             # Check if the file is a .npy file and contains the given name
             if file.endswith('.npy') and name in file:
@@ -55,26 +55,30 @@ def graph_all_mixed_losses(name):
 
         print(file)
 
-        if (platform.system() == 'Windows'):
-            p_value = float(file.split('\\')[2].split("_")[0]) / 10
-        else:
-            p_value = float(file.split('/')[2].split("_")[0]) / 10
+        # if (platform.system() == 'Windows'):
+        #     p_value = float(file.split('\\')[2].split("_")[0]) / 10
+        # else:
+        #     p_value = float(file.split('/')[2].split("_")[0]) / 10
         
         total_loss = loss_arr[0]
-        mse_loss = loss_arr[1] / p_value
-        wasserstein_loss = loss_arr[2] / (1 - p_value)
+        mse_loss = loss_arr[1]
+        wasserstein_loss = loss_arr[2]
+
+        if (len(loss_arr) > 3):
+            cluster_align_loss = loss_arr[3]
+            plt.plot(cluster_align_loss, label=f'{label} - Cluster Align')
 
         # Use the parent directory name as the label
         
-        # plt.plot(total_loss, label=f'{p_value}-{label} - Total Loss')
-        plt.plot(mse_loss, label=f'{p_value}-{label} - MSE Loss')
-        # plt.plot(wasserstein_loss, label=f'{p_value}-{label} - Wasserstein Loss')
+        plt.plot(total_loss, label=f'{label} - Total Loss')
+        plt.plot(mse_loss, label=f'{label} - MSE Loss')
+        plt.plot(wasserstein_loss, label=f'{label} - Wasserstein Loss')
 
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.title(f'Loss per unit over epochs for files containing "{name}"')
     plt.legend()  # Add a legend to differentiate the curves
-    plt.ylim(0, 0.00004)  # Set y-axis limits (adjust the values as needed)
+    plt.ylim(0, 0.000009)  # Set y-axis limits (adjust the values as needed)
     plt.tight_layout()  # Adjust the layout to prevent cutting off labels
     plt.show()
     

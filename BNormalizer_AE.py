@@ -10,6 +10,8 @@ import platform
 from geomloss import SamplesLoss
 from sklearn.mixture import GaussianMixture
 import matplotlib.pyplot as plt
+import itertools
+import random
 
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
@@ -82,6 +84,15 @@ class BNorm_AE(nn.Module):
             x = self.down5(x)
             return x
         
+    def decode(self, input_data):
+        with torch.no_grad():
+            y = self.up1(input_data)
+            y = self.relu(y)
+            y = self.up2(y)
+            y = self.relu(y)
+            y = self.up3(y)
+            return y
+        
 
 def train_model(model: nn.Module, 
                 data_loader: torch.utils.data.DataLoader, 
@@ -103,6 +114,7 @@ def train_model(model: nn.Module,
     mse_losses = []
     tvd_losses = []
     cluster_align_losses = []
+    tvd_2d_losses = []
     
     for epoch in range(epoch_count):
         total_loss = 0.0
@@ -110,6 +122,7 @@ def train_model(model: nn.Module,
         total_mse_loss = 0.0
         total_tvd_loss = 0.0
         total_cluster_align_loss = 0.0
+        total_2d_tvd_loss = 0.0
         
         for batch in data_loader:
             x = batch[0]
@@ -121,11 +134,12 @@ def train_model(model: nn.Module,
             
             # Calculate MSE and Sinkhorn loss
             mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
-            wasserstein_loss = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
-            cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, x[:, 6:], cluster_centres, cluster_cov, batch[1])
+            # wasserstein_loss = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
+            # cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, x[:, 6:], cluster_centres, cluster_cov, batch[1])
+            tvd_2d_loss = all_2d_pair_loss(pred_ae, x[:, 6:])
             
-            # Total loss (including GMM loss)
-            total_loss_ae = mse_loss_ae + wasserstein_loss + cluster_align_loss
+            # Total loss
+            total_loss_ae = mse_loss_ae + tvd_2d_loss
             total_loss_ae.backward()
             optimizer.step()
             
@@ -133,29 +147,151 @@ def train_model(model: nn.Module,
             total_loss += total_loss_ae.item()
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
-            total_tvd_loss += wasserstein_loss.item()
-            total_cluster_align_loss += cluster_align_loss.item()
+            # total_tvd_loss += wasserstein_loss.item()
+            # total_cluster_align_loss += cluster_align_loss.item()
+            total_2d_tvd_loss += tvd_2d_loss.item()
         
         # Calculate average losses
         avg_loss = total_loss / total_samples
         avg_mse_loss = total_mse_loss / total_samples
         avg_tvd_loss = total_tvd_loss / total_samples
         avg_cluster_align_loss = total_cluster_align_loss / total_samples
+        avg_2d_tvd_loss = total_2d_tvd_loss / total_samples
         
         # Append losses to lists
         total_losses.append(avg_loss)
         mse_losses.append(avg_mse_loss)
         tvd_losses.append(avg_tvd_loss)
         cluster_align_losses.append(avg_cluster_align_loss)
+        tvd_2d_losses.append(avg_2d_tvd_loss)
         
         print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
         print(f'Epoch: {epoch} MSE Loss per unit: {avg_mse_loss}')
         print(f'Epoch: {epoch} TVD Loss per unit: {avg_tvd_loss}')
         print(f'Epoch: {epoch} Cluster Alignment Loss per unit: {avg_cluster_align_loss}')
+        print(f'Epoch: {epoch} 2D TVD Loss per unit: {avg_2d_tvd_loss}')
         print("--------------------------------------------------")
     
     print("##### FINISHED TRAINING OF MODEL #####")
     return model, np.vstack((total_losses, mse_losses, tvd_losses, cluster_align_losses))
+
+
+
+##################### 2D HISTOGRAM LOSS #####################
+def generate_2d_hist(feature_values, num_bins, min_val, max_val):
+    """
+    Generate a 2D histogram from a tensor of 2D values, in a differentiable manner.
+    
+    Parameters:
+    - feature_values: Tensor of feature values (shape: [N, 2]).
+    - num_bins: Number of bins in each dimension of the histogram (int or tuple of 2 ints).
+    - min_val: Minimum value in the range of the histogram (float or tuple of 2 floats).
+    - max_val: Maximum value in the range of the histogram (float or tuple of 2 floats).
+
+    Returns:
+    - Tensor representing the 2D histogram (shape: [num_bins[0], num_bins[1]]).
+    """
+    if isinstance(num_bins, int):
+        num_bins = (num_bins, num_bins)
+    if isinstance(min_val, (int, float)):
+        min_val = (min_val, min_val)
+    if isinstance(max_val, (int, float)):
+        max_val = (max_val, max_val)
+    
+    device = feature_values.device
+    
+    # Calculate bin centers for both dimensions
+    bin_centre_offsets = [(max_val[i] - min_val[i]) / (2 * num_bins[i]) for i in range(2)]
+    bin_centers = [
+        torch.linspace(min_val[i] + bin_centre_offsets[i], max_val[i] - bin_centre_offsets[i], num_bins[i]).to(device)
+        for i in range(2)
+    ]
+    
+    # Calculate bin widths
+    bin_widths = [(max_val[i] - min_val[i]) / num_bins[i] for i in range(2)]
+    
+    # Compute bin probabilities for both dimensions
+    bin_probs = []
+    for i in range(2):
+        feature_values_expanded = feature_values[:, i].unsqueeze(1)
+        bin_centers_expanded = bin_centers[i].unsqueeze(0)
+        distances = torch.abs(feature_values_expanded - bin_centers_expanded)
+        bin_probs.append(torch.exp(-distances / (2 * bin_widths[i])))
+    
+    # Compute 2D histogram
+    histogram_2d = torch.einsum('ni,nj->ij', bin_probs[0], bin_probs[1])
+    
+    # Normalize the histogram
+    histogram_2d = histogram_2d / histogram_2d.sum()
+    
+    return histogram_2d
+
+
+def tvd_loss_2d(pred, target, sinkhorn_distance, num_bins=2, num_pairs=None):
+    """
+    Compute the Total Variation Distance (TVD) loss using 2D histograms.
+    
+    Parameters:
+    - pred: Predicted values tensor (shape: [N, M] where N is the number of samples and M is the number of features)
+    - target: Target values tensor (shape: [N, M])
+    - sinkhorn_distance: Function to compute the Sinkhorn distance
+    - num_bins: Number of bins for each dimension in the 2D histogram (default: 20)
+    - num_pairs: Number of column pairs to use (default: None, uses all possible pairs)
+    
+    Returns:
+    - Mean TVD distance across all selected column pairs
+    """
+    device = pred.device
+    num_columns = pred.size(1)
+    
+    # Generate all possible pairs of column indices
+    all_pairs = list(itertools.combinations(range(num_columns), 2))
+    
+    # If num_pairs is specified, randomly select that many pairs
+    if num_pairs is not None and num_pairs < len(all_pairs):
+        selected_pairs = random.sample(all_pairs, num_pairs)
+    else:
+        selected_pairs = all_pairs
+    
+    distances = []
+    for i, j in selected_pairs:
+        # Get the predicted and target values for the column pair
+        pred_cols = pred[:, [i, j]].to(device)
+        target_cols = target[:, [i, j]].to(device)
+        
+        # Determine the histogram range for the column pair
+        min_vals = torch.min(torch.min(pred_cols, dim=0)[0], torch.min(target_cols, dim=0)[0])
+        max_vals = torch.max(torch.max(pred_cols, dim=0)[0], torch.max(target_cols, dim=0)[0])
+        
+        # Compute the 2D histograms for both predicted and target values
+        pred_hist = generate_2d_hist(pred_cols, num_bins=num_bins, 
+                                     min_val=(float(min_vals[0]), float(min_vals[1])), 
+                                     max_val=(float(max_vals[0]), float(max_vals[1])))
+        target_hist = generate_2d_hist(target_cols, num_bins=num_bins, 
+                                       min_val=(float(min_vals[0]), float(min_vals[1])), 
+                                       max_val=(float(max_vals[0]), float(max_vals[1])))
+        
+        # Calculate the Sinkhorn distance
+        tvd_dist = torch.sum((pred_hist - target_hist).abs())
+        distances.append(tvd_dist)
+    
+    # Compute the mean of the TVD distances across all selected column pairs
+    mean_tvd_distance = torch.mean(torch.stack(distances))
+    
+    return mean_tvd_distance
+
+def all_2d_pair_loss(pred, target):
+    """ Go through each pair of columns and calculate the MSE loss for each pair
+    """
+
+    num_columns = pred.size(1)
+    mse_losses = []
+    for i in range(num_columns):
+        for j in range(i+1, num_columns):
+            mse_loss = nn.MSELoss(reduction='sum')(pred[:, [i, j]], target[:, [i, j]])
+            mse_losses.append(mse_loss)
+    
+    return torch.mean(torch.stack(mse_losses))
 
 
 
@@ -213,7 +349,7 @@ def assign_clusters_and_compute_mse(pred_ae, x, cluster_centers, cluster_covs, b
 
     # Compute the MSE loss for each point to its assigned cluster center
     assigned_centers = cluster_centers[batch_labels]
-    # assigned_covs = cluster_covs[batch_labels]
+    assigned_covs = cluster_covs[batch_labels]
 
     diff = (pred_ae - assigned_centers) ** 2
     mse_diff = torch.mean(diff, dim=1)
@@ -255,13 +391,13 @@ def tvd_loss(pred, target, sinkhorn_distance, num_bins=200):
 
         # Calculate the Wasserstein distance (Earth Mover's Distance)
         # wasserstein_dist = nn.MSELoss(reduction='sum')(pred_hist, target_hist)
-        wasserstein_dist = sinkhorn_distance(pred_hist.unsqueeze(0), target_hist.unsqueeze(0))
-        distances.append(wasserstein_dist)
+        tvd_dist = sinkhorn_distance(pred_hist.unsqueeze(0), target_hist.unsqueeze(0))
+        distances.append(tvd_dist)
 
     # Compute the mean of the Wasserstein distances across all columns
-    mean_wasserstein_distance = torch.mean(torch.stack(distances))
+    mean_tvd_distance = torch.mean(torch.stack(distances))
 
-    return mean_wasserstein_distance
+    return mean_tvd_distance
 
 def generate_hist(feature_values, num_bins, min_val, max_val):
     """
@@ -410,11 +546,11 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 ##################### MAIN #####################
 if __name__ == "__main__":
-    train_models = True
+    train_models = False
     show_result = True
     batches_to_run = ["Panel1"]
     p_values = None
-    folder_path = "G_3"
+    folder_path = "S_3"
 
 
     if train_models:
@@ -430,7 +566,7 @@ if __name__ == "__main__":
                 data = get_dataloader(x, ref_labels, 2048)
 
                 model = BNorm_AE(x.shape[1], 3)
-                model, losses = train_model(model, data, 2000, 0.0001, 0.3, cluster_centres, cluseter_cov)
+                model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
@@ -444,23 +580,13 @@ if __name__ == "__main__":
                 num_cols = x.shape[1]
 
                 model = BNorm_AE(x.shape[1], 3)
-                model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device))
+                model.load_state_dict(torch.load(f'{folder_path}/3.0_model_{directory}.pt', map_location=device))
                 model = model.to(device)
 
                 x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
+
                 x_transformed = model(x_tensor).cpu().detach().numpy()  
                 x_transformed = np.hstack((x[:, :6], x_transformed))
 
                 np.save(f'./{directory}_x.npy', x_transformed)
                 print(f"-------- FINISHED SHOWING RESULTS FOR {directory} -----------")
-
-        
-
-
-
-
-
-
-    
-
-
