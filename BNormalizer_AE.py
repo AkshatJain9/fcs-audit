@@ -9,6 +9,7 @@ import os
 import platform
 from geomloss import SamplesLoss
 from sklearn.mixture import GaussianMixture
+import torch.distributions as dist
 
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
@@ -130,11 +131,10 @@ def train_model(model: nn.Module,
             # Calculate MSE and Sinkhorn loss
             mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
             tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
-            cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, x[:, 6:], cluster_centres, cluster_cov, batch[1])
+            cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
             
             # Total loss
             total_loss_ae = 0.9 * (0.3 * mse_loss_ae + 0.7 * tvd_loss_val) + 0.1 * cluster_align_loss
-            total_loss_ae = cluster_align_loss
             total_loss_ae.backward()
             optimizer.step()
             
@@ -173,28 +173,41 @@ def get_main_cell_pops(data, k):
     gmm = GaussianMixture(n_components=k, random_state=0).fit(data)
     return gmm.means_, gmm.covariances_, gmm.predict(data)
 
-def assign_clusters_and_compute_mse(pred_ae, x, cluster_centers, cluster_covs, batch_labels):
+
+def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batch_labels):
     """
-    Assigns each row in pred_ae to the nearest cluster center and computes the average MSE loss.
+    Assigns each row in pred_ae to the nearest cluster center, generates random points in the
+    neighborhood of the cluster center based on the covariance matrix, and computes the average MSE loss.
     
     Args:
     pred_ae (torch.Tensor): 2D tensor of shape (n_samples, n_features)
     cluster_centers (torch.Tensor): 2D tensor of shape (n_clusters, n_features)
+    cluster_covs (torch.Tensor): 3D tensor of shape (n_clusters, n_features, n_features)
+    batch_labels (torch.Tensor): 1D tensor of cluster assignments for each sample
     
     Returns:
-    tuple: (assignments, per_sample_loss, average_loss)
-        - assignments: 1D tensor of cluster assignments for each sample
-        - per_sample_loss: 1D tensor of MSE loss for each sample
-        - average_loss: Scalar tensor of average MSE loss across all samples
+    torch.Tensor: Scalar tensor of average MSE loss across all samples
     """
-
-    # Compute the MSE loss for each point to its assigned cluster center
+    
+    # Get the assigned cluster centers and covariance matrices for each sample
     assigned_centers = cluster_centers[batch_labels]
+    assigned_covs = cluster_covs[batch_labels]
 
-    diff = (pred_ae - assigned_centers) ** 2
-    mse_diff = torch.mean(diff, dim=1)
+    # Step 1: Compute Cholesky decomposition of covariance matrices for faster sampling
+    L = torch.linalg.cholesky(assigned_covs)  # Shape: (n_samples, n_features, n_features)
 
+    # Step 2: Sample from standard normal distribution and transform with Cholesky
+    z = torch.randn(pred_ae.shape, device=pred_ae.device)  # Shape: (n_samples, n_features)
+    
+    # Step 3: Generate random points using Cholesky decomposition
+    random_points = assigned_centers + torch.bmm(L, z.unsqueeze(-1)).squeeze(-1)  # Shape: (n_samples, n_features)
+
+    # Step 4: Compute the MSE loss between pred_ae and the sampled random points
+    mse_diff = torch.mean((pred_ae - random_points) ** 2, dim=1)
+    
+    # Compute the average loss across all samples
     total_loss = mse_diff.mean()
+    
     return total_loss
 
 ##################### SPREAD LOSS #####################
@@ -394,7 +407,11 @@ if __name__ == "__main__":
                 data = get_dataloader(x, ref_labels, 512)
 
                 model = BNorm_AE(x.shape[1], 3)
-                model, losses = train_model(model, data, 2000, 0.0001, 0.3, cluster_centres, cluseter_cov)
+
+                model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
+                model = model.to(device)
+
+                model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
