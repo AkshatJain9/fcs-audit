@@ -2,7 +2,7 @@ from BNormalizer_AE import BNorm_AE
 import numpy as np
 
 
-def bnormalizer_ae_splinefn(bnormalizer: BNorm_AE, ref_batch: np.ndarray, target_batches: dict):
+def bnormalizer_ae_linear(bnormalizer: BNorm_AE, ref_batch: np.ndarray, target_batches: dict):
     ref_batch_encoded = bnormalizer.encode(ref_batch)
     target_batches_encoded = dict()
     for key, target_batch in target_batches.items():

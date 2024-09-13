@@ -9,7 +9,7 @@ import os
 import platform
 from geomloss import SamplesLoss
 from sklearn.mixture import GaussianMixture
-import torch.distributions as dist
+import torch.nn.functional as F
 
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
@@ -67,7 +67,7 @@ class BNorm_AE(nn.Module):
         y = self.up2(y)
         y = self.relu(y)
         y = self.up3(y)
-        return y
+        return y, x
     
     def encode(self, input_data):
         with torch.no_grad():
@@ -126,7 +126,9 @@ def train_model(model: nn.Module,
             optimizer.zero_grad()
             
             # Forward pass
-            pred_ae = model(x)
+            output = model(x)
+            pred_ae = output[0]
+            latent = output[1]
             
             # Calculate MSE and Sinkhorn loss
             mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
@@ -142,8 +144,8 @@ def train_model(model: nn.Module,
             total_loss += total_loss_ae.item()
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
-            total_tvd_loss += tvd_loss_val.item()
-            total_cluster_align_loss += cluster_align_loss.item()
+            # total_tvd_loss += tvd_loss_val.item()
+            # total_cluster_align_loss += cluster_align_loss.item()
         
         # Calculate average losses
         avg_loss = total_loss / total_samples
@@ -166,6 +168,35 @@ def train_model(model: nn.Module,
     print("##### FINISHED TRAINING OF MODEL #####")
     return model, np.vstack((total_losses, mse_losses, tvd_losses, cluster_align_losses))
 
+
+################ SPREAD LOSS ################
+def spread_loss(latent_embeddings, labels, min_variance=0.05):
+    """
+    Computes a spread loss that penalizes clusters whose variance in the latent space is too small.
+    Args:
+        latent_embeddings (torch.Tensor): Latent space representations of the data.
+        labels (torch.Tensor): Cluster assignments for each sample.
+        min_variance (float): Minimum allowable variance for each cluster.
+
+    Returns:
+        torch.Tensor: The spread loss to ensure variance in latent space is not too small.
+    """
+    unique_labels = labels.unique()
+    spread_loss_value = 0.0
+    
+    for label in unique_labels:
+        # Get the embeddings for the current cluster
+        cluster_points = latent_embeddings[labels == label]
+        
+        if len(cluster_points) > 1:
+            # Compute the variance of the points in this cluster
+            cluster_variance = torch.var(cluster_points, dim=0)
+            
+            # Penalize clusters whose variance is too small
+            variance_penalty = F.relu(min_variance - cluster_variance).mean()
+            spread_loss_value += variance_penalty
+    
+    return spread_loss_value / len(unique_labels)  # Average across clusters
 
 
 ##################### CLUSTER LOSS #####################
@@ -193,22 +224,47 @@ def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batc
     assigned_centers = cluster_centers[batch_labels]
     assigned_covs = cluster_covs[batch_labels]
 
-    # Step 1: Compute Cholesky decomposition of covariance matrices for faster sampling
-    L = torch.linalg.cholesky(assigned_covs)  # Shape: (n_samples, n_features, n_features)
+    # Compute simple MSE to cluster centers
+    mse_diff = torch.mean((pred_ae - assigned_centers) ** 2, dim=1)
 
-    # Step 2: Sample from standard normal distribution and transform with Cholesky
-    z = torch.randn(pred_ae.shape, device=pred_ae.device)  # Shape: (n_samples, n_features)
-    
-    # Step 3: Generate random points using Cholesky decomposition
-    random_points = assigned_centers + torch.bmm(L, z.unsqueeze(-1)).squeeze(-1)  # Shape: (n_samples, n_features)
+    return mse_diff.mean()
 
-    # Step 4: Compute the MSE loss between pred_ae and the sampled random points
-    mse_diff = torch.mean((pred_ae - random_points) ** 2, dim=1)
+
+    # # Step 1: Compute Cholesky decomposition of covariance matrices for faster sampling
+    # L = torch.linalg.cholesky(assigned_covs)  # Shape: (n_samples, n_features, n_features)
+
+    # # Step 2: Sample from standard normal distribution and transform with Cholesky
+    # z = torch.randn(pred_ae.shape, device=pred_ae.device)  # Shape: (n_samples, n_features)
     
-    # Compute the average loss across all samples
-    total_loss = mse_diff.mean()
+    # # Step 3: Generate random points using Cholesky decomposition
+    # random_points = assigned_centers + torch.bmm(L, z.unsqueeze(-1)).squeeze(-1)  # Shape: (n_samples, n_features)
+
+    # # Step 4: Compute the MSE loss between pred_ae and the sampled random points
+    # mse_diff = torch.mean((pred_ae - random_points) ** 2, dim=1)
     
-    return total_loss
+    # # Compute the average loss across all samples
+    # total_loss = mse_diff.mean()
+    
+    # return total_loss
+
+def compute_cluster_mid_diff(x, pred_ae, cluster_centers, batch_labels):
+    """ Computes the difference between how different x and pred_ae are from the cluster centers,
+    only penalizing when pred_ae is closer to the center than x, using ReLU """
+
+    # Get the assigned cluster centers for each sample
+    assigned_centers = cluster_centers[batch_labels]
+
+    # Compute the squared distances between x and pred_ae to the assigned cluster centers
+    x_diff = 10 * torch.sum((x - assigned_centers) ** 2, dim=1)
+    pred_ae_diff = torch.sum((pred_ae - assigned_centers) ** 2, dim=1)
+
+    # Use ReLU to penalize only when pred_ae is closer to the center than x
+    penalized_diff = F.relu(x_diff - pred_ae_diff)
+
+    # Compute the mean of the penalized differences
+    mid_diff = torch.mean(penalized_diff)
+
+    return mid_diff
 
 ##################### SPREAD LOSS #####################
 def tvd_loss(pred, target, sinkhorn_distance, num_bins=200):
@@ -391,7 +447,7 @@ if __name__ == "__main__":
     show_result = True
     batches_to_run = ["Panel1"]
     p_values = None
-    folder_path = "F_3"
+    folder_path = "V_3"
 
 
     if train_models:
@@ -404,12 +460,12 @@ if __name__ == "__main__":
                 cluster_centres = torch.tensor(ref_centres, dtype=torch.float32).to(device)
                 cluseter_cov = torch.tensor(ref_cov, dtype=torch.float32).to(device)
 
-                data = get_dataloader(x, ref_labels, 512)
+                data = get_dataloader(x, ref_labels, 1024)
 
                 model = BNorm_AE(x.shape[1], 3)
 
-                model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
-                model = model.to(device)
+                # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
+                # model = model.to(device)
 
                 model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
@@ -430,7 +486,7 @@ if __name__ == "__main__":
 
                 x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
 
-                x_transformed = model(x_tensor).cpu().detach().numpy()  
+                x_transformed = model(x_tensor)[0].cpu().detach().numpy()  
                 x_transformed = np.hstack((x[:, :6], x_transformed))
 
                 np.save(f'./{directory}_x.npy', x_transformed)
