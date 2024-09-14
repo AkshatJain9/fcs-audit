@@ -141,17 +141,17 @@ def train_model(model: nn.Module,
 
 
             # Randomly sample 100 points for vr_complex_loss
-            batch_size = x.shape[0]
-            num_points = min(250, batch_size)  # Ensure we don't sample more than available
-            indices = torch.randperm(batch_size)[:num_points]
+            # batch_size = x.shape[0]
+            # num_points = min(250, batch_size)  # Ensure we don't sample more than available
+            # indices = torch.randperm(batch_size)[:num_points]
 
-            # Sample the data
-            x_sampled = x[indices, 6:]
-            latent_sampled = latent[indices]
+            # # Sample the data
+            # x_sampled = x[indices, 6:]
+            # latent_sampled = latent[indices]
 
             # Compute vr_complex_loss with the sampled data
             # vr_complex_loss_val = vr_complex_loss_clusters(x_sampled, latent_sampled, batch[1][indices])
-            vr_complex_loss_val = vr_complex_loss(x_sampled, latent_sampled)
+            vr_complex_loss_val = spread_loss(latent, batch[1])
             # vr_complex_loss_val = spread_loss(latent, batch[1])
             
             # Total loss
@@ -358,12 +358,14 @@ def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batc
     
     # Get the assigned cluster centers and covariance matrices for each sample
     assigned_centers = cluster_centers[batch_labels]
-    assigned_covs = cluster_covs[batch_labels]
+
+    mean_diff_losses = []
+    for batch_label in batch_labels.unique():
+        mean_pred = pred_ae[batch_labels == batch_label].mean(dim=0)
+        mean_diff_losses.append(torch.mean((mean_pred - assigned_centers[batch_label]) ** 2))
 
     # Compute simple MSE to cluster centers
-    mse_diff = torch.mean((pred_ae - assigned_centers) ** 2, dim=1)
-
-    return mse_diff.mean()
+    return torch.mean(torch.stack(mean_diff_losses))
 
 
     # # Step 1: Compute Cholesky decomposition of covariance matrices for faster sampling
@@ -382,25 +384,6 @@ def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batc
     # total_loss = mse_diff.mean()
     
     # return total_loss
-
-def compute_cluster_mid_diff(x, pred_ae, cluster_centers, batch_labels):
-    """ Computes the difference between how different x and pred_ae are from the cluster centers,
-    only penalizing when pred_ae is closer to the center than x, using ReLU """
-
-    # Get the assigned cluster centers for each sample
-    assigned_centers = cluster_centers[batch_labels]
-
-    # Compute the squared distances between x and pred_ae to the assigned cluster centers
-    x_diff = 10 * torch.sum((x - assigned_centers) ** 2, dim=1)
-    pred_ae_diff = torch.sum((pred_ae - assigned_centers) ** 2, dim=1)
-
-    # Use ReLU to penalize only when pred_ae is closer to the center than x
-    penalized_diff = F.relu(x_diff - pred_ae_diff)
-
-    # Compute the mean of the penalized differences
-    mid_diff = torch.mean(penalized_diff)
-
-    return mid_diff
 
 ##################### SPREAD LOSS #####################
 def tvd_loss(pred, target, sinkhorn_distance, num_bins=200):
@@ -579,11 +562,11 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 ##################### MAIN #####################
 if __name__ == "__main__":
-    train_models = False
+    train_models = True
     show_result = True
     batches_to_run = ["Panel1"]
     p_values = None
-    folder_path = "S_3"
+    folder_path = "VR"
 
 
     if train_models:
@@ -592,7 +575,7 @@ if __name__ == "__main__":
                 print(f"-------- TRAINING FOR {directory} -----------")
    
                 x = load_data(directory)
-                ref_centres, ref_cov, ref_labels = get_main_cell_pops(x[:, 6:], 7)
+                ref_centres, ref_cov, ref_labels = get_main_cell_pops(x[:, 6:], 13)
                 cluster_centres = torch.tensor(ref_centres, dtype=torch.float32).to(device)
                 cluseter_cov = torch.tensor(ref_cov, dtype=torch.float32).to(device)
 
@@ -603,7 +586,7 @@ if __name__ == "__main__":
                 model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 model = model.to(device)
 
-                model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
+                model, losses = train_model(model, data, 1000, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
@@ -617,7 +600,7 @@ if __name__ == "__main__":
                 num_cols = x.shape[1]
 
                 model = BNorm_AE(x.shape[1], 3)
-                model.load_state_dict(torch.load(f'{folder_path}/3.0_model_{directory}.pt', map_location=device))
+                model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device))
                 model = model.to(device)
 
                 x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
