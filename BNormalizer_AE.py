@@ -10,6 +10,7 @@ import platform
 from geomloss import SamplesLoss
 from sklearn.mixture import GaussianMixture
 import torch.nn.functional as F
+from itertools import combinations
 # from torchph.pershom import vr_persistence_l1, vr_persistence
 
 
@@ -140,17 +141,17 @@ def train_model(model: nn.Module,
 
 
             # Randomly sample 100 points for vr_complex_loss
-            # batch_size = x.shape[0]
-            # num_points = min(250, batch_size)  # Ensure we don't sample more than available
-            # indices = torch.randperm(batch_size)[:num_points]
+            batch_size = x.shape[0]
+            num_points = min(250, batch_size)  # Ensure we don't sample more than available
+            indices = torch.randperm(batch_size)[:num_points]
 
-            # # Sample the data
-            # x_sampled = x[indices, 6:]
-            # latent_sampled = latent[indices]
+            # Sample the data
+            x_sampled = x[indices, 6:]
+            latent_sampled = latent[indices]
 
             # Compute vr_complex_loss with the sampled data
-            # vr_complex_loss_val = vr_complex_loss(x_sampled, latent_sampled)
-            vr_complex_loss_val = spread_loss(latent, batch[1])
+            vr_complex_loss_val = vr_complex_loss(x_sampled, latent_sampled)
+            # vr_complex_loss_val = spread_loss(latent, batch[1])
             
             # Total loss
             # total_loss_ae = 0.9 * (0.3 * mse_loss_ae + 0.7 * tvd_loss_val) + 0.1 * cluster_align_loss
@@ -195,6 +196,35 @@ def train_model(model: nn.Module,
 
 ############ VR-Complex LOSS ############
 
+
+def vr_complex_loss_clusters(x, latent, labels):
+    """
+    Compute the topological loss between the input data x and the latent representations latent but only within clusters.
+    Args:
+    x: Input data tensor of shape (batch_size, num_features)
+    latent: Latent representations tensor of shape (batch_size, latent_dim)
+    labels: Cluster assignments for each sample
+    Returns:
+    loss: The topological loss (torch.Tensor)
+    """
+    # Compute pairwise distance matrices
+    x_dists = torch.cdist(x, x)  # Shape: (batch_size, batch_size)
+    latent_dists = torch.cdist(latent, latent)
+
+    # Group indices by label
+    label_rows = {}
+    for i, label in enumerate(labels):
+        label_rows.setdefault(label, []).append(i)
+
+    # Generate pairs of indices within each cluster
+    indices = [pair for cluster in label_rows.values() for pair in combinations(cluster, 2)]
+    indices = np.array(indices)
+
+    # Compute loss using the indices
+    loss = topological_loss(x_dists, latent_dists, indices, indices)
+    return loss
+
+
 def vr_complex_loss(x, latent):
     """
     Compute the topological loss between the input data x and the latent representations latent.
@@ -233,7 +263,7 @@ def get_sorted_indices(A):
     excluding the diagonal entries.
     """
     # Get the indices of the upper triangle, excluding the diagonal
-    indices = torch.triu_indices(A.size(0), A.size(1), offset=1)
+    indices = torch.triu_indices(A.size(0), A.size(1), offset=1).to(device)
     # Extract the values at these indices
     values = A[indices[0], indices[1]]
     # Sort the values and get the indices that would sort the array
@@ -570,7 +600,7 @@ if __name__ == "__main__":
                 # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 # model = model.to(device)
 
-                model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
+                model, losses = train_model(model, data, 1000, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
