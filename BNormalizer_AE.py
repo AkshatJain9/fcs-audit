@@ -135,25 +135,27 @@ def train_model(model: nn.Module,
             
             # Calculate MSE and Sinkhorn loss
             mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
-            tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
-            cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
+            # tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
+            # cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
 
 
             # Randomly sample 100 points for vr_complex_loss
-            batch_size = x.shape[0]
-            num_points = min(250, batch_size)  # Ensure we don't sample more than available
-            indices = torch.randperm(batch_size)[:num_points]
+            # batch_size = x.shape[0]
+            # num_points = min(250, batch_size)  # Ensure we don't sample more than available
+            # indices = torch.randperm(batch_size)[:num_points]
 
-            # Sample the data
-            x_sampled = x[indices, 6:]
-            latent_sampled = latent[indices]
+            # # Sample the data
+            # x_sampled = x[indices, 6:]
+            # latent_sampled = latent[indices]
 
             # Compute vr_complex_loss with the sampled data
-            vr_complex_loss_val = vr_complex_loss(x_sampled, latent_sampled)
+            # vr_complex_loss_val = vr_complex_loss(x_sampled, latent_sampled)
+            vr_complex_loss_val = spread_loss(latent, batch[1])
             
             # Total loss
-            total_loss_ae = 0.9 * (0.3 * mse_loss_ae + 0.7 * tvd_loss_val) + 0.1 * cluster_align_loss
-            total_loss_ae = 0.8 * total_loss_ae + 0.2 * vr_complex_loss_val
+            # total_loss_ae = 0.9 * (0.3 * mse_loss_ae + 0.7 * tvd_loss_val) + 0.1 * cluster_align_loss
+            # total_loss_ae = 0.8 * total_loss_ae + 0.2 * vr_complex_loss_val
+            total_loss_ae = mse_loss_ae + vr_complex_loss_val
             total_loss_ae.backward()
             optimizer.step()
             
@@ -161,8 +163,8 @@ def train_model(model: nn.Module,
             total_loss += total_loss_ae.item()
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
-            total_tvd_loss += tvd_loss_val.item()
-            total_cluster_align_loss += cluster_align_loss.item()
+            # total_tvd_loss += tvd_loss_val.item()
+            # total_cluster_align_loss += cluster_align_loss.item()
             total_vr_complex_loss += vr_complex_loss_val.item()
         
         # Calculate average losses
@@ -271,7 +273,7 @@ def topological_loss(A_X, A_Z, pi_X, pi_Z):
     return Lt
 
 ################ SPREAD LOSS ################
-def spread_loss(latent_embeddings, labels, min_variance=0.05):
+def spread_loss(latent_embeddings, labels, min_variance=0.10):
     """
     Computes a spread loss that penalizes clusters whose variance in the latent space is too small.
     Args:
@@ -565,8 +567,8 @@ if __name__ == "__main__":
 
                 model = BNorm_AE(x.shape[1], 3)
 
-                model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
-                model = model.to(device)
+                # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
+                # model = model.to(device)
 
                 model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
