@@ -27,9 +27,9 @@ A = torch.tensor([[1, 2, 3],
 sorted_indices = get_sorted_indices(A)
 print(sorted_indices)
 
-# Epoch: 0 Loss per unit: 0.0002865985004603863
-# Epoch: 0 MSE Loss per unit: 4.778460520319641e-06
-# Epoch: 0 TVD Loss per unit: 3.388462931616232e-07
-# Epoch: 0 Cluster Alignment Loss per unit: 1.2680342467501759e-05
-# Epoch: 0 VR Complex Loss per unit: 0.0014219057130813598
+# Epoch: 0 Loss per unit: 0.00012614261969923972
+# Epoch: 0 MSE Loss per unit: 4.76522421464324e-06
+# Epoch: 0 TVD Loss per unit: 3.2664120371919126e-07
+# Epoch: 0 Cluster Alignment Loss per unit: 1.264412285760045e-05
+# Epoch: 0 VR Complex Loss per unit: 0.0006196858558058739
 # --------------------------------------------------

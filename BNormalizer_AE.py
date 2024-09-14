@@ -136,8 +136,8 @@ def train_model(model: nn.Module,
             
             # Calculate MSE and Sinkhorn loss
             mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
-            # tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
-            # cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
+            tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
+            cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
 
 
             # Randomly sample 100 points for vr_complex_loss
@@ -150,13 +150,14 @@ def train_model(model: nn.Module,
             latent_sampled = latent[indices]
 
             # Compute vr_complex_loss with the sampled data
+            # vr_complex_loss_val = vr_complex_loss_clusters(x_sampled, latent_sampled, batch[1][indices])
             vr_complex_loss_val = vr_complex_loss(x_sampled, latent_sampled)
             # vr_complex_loss_val = spread_loss(latent, batch[1])
             
             # Total loss
-            # total_loss_ae = 0.9 * (0.3 * mse_loss_ae + 0.7 * tvd_loss_val) + 0.1 * cluster_align_loss
-            # total_loss_ae = 0.8 * total_loss_ae + 0.2 * vr_complex_loss_val
-            total_loss_ae = mse_loss_ae + vr_complex_loss_val
+            total_loss_ae = 0.9 * (0.3 * mse_loss_ae + 0.7 * tvd_loss_val) + 0.1 * cluster_align_loss
+            total_loss_ae = 0.8 * total_loss_ae + 0.2 * vr_complex_loss_val
+            # total_loss_ae = mse_loss_ae + vr_complex_loss_val
             total_loss_ae.backward()
             optimizer.step()
             
@@ -164,8 +165,8 @@ def train_model(model: nn.Module,
             total_loss += total_loss_ae.item()
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
-            # total_tvd_loss += tvd_loss_val.item()
-            # total_cluster_align_loss += cluster_align_loss.item()
+            total_tvd_loss += tvd_loss_val.item()
+            total_cluster_align_loss += cluster_align_loss.item()
             total_vr_complex_loss += vr_complex_loss_val.item()
         
         # Calculate average losses
@@ -211,6 +212,7 @@ def vr_complex_loss_clusters(x, latent, labels):
     x_dists = torch.cdist(x, x)  # Shape: (batch_size, batch_size)
     latent_dists = torch.cdist(latent, latent)
 
+    labels = labels.cpu().numpy()
     # Group indices by label
     label_rows = {}
     for i, label in enumerate(labels):
@@ -219,6 +221,7 @@ def vr_complex_loss_clusters(x, latent, labels):
     # Generate pairs of indices within each cluster
     indices = [pair for cluster in label_rows.values() for pair in combinations(cluster, 2)]
     indices = np.array(indices)
+    
 
     # Compute loss using the indices
     loss = topological_loss(x_dists, latent_dists, indices, indices)
@@ -576,11 +579,11 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 ##################### MAIN #####################
 if __name__ == "__main__":
-    train_models = True
+    train_models = False
     show_result = True
     batches_to_run = ["Panel1"]
     p_values = None
-    folder_path = "VR"
+    folder_path = "S_3"
 
 
     if train_models:
@@ -597,10 +600,10 @@ if __name__ == "__main__":
 
                 model = BNorm_AE(x.shape[1], 3)
 
-                # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
-                # model = model.to(device)
+                model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
+                model = model.to(device)
 
-                model, losses = train_model(model, data, 1000, 0.0001, 0.3, cluster_centres, cluseter_cov)
+                model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
@@ -614,7 +617,7 @@ if __name__ == "__main__":
                 num_cols = x.shape[1]
 
                 model = BNorm_AE(x.shape[1], 3)
-                model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device))
+                model.load_state_dict(torch.load(f'{folder_path}/3.0_model_{directory}.pt', map_location=device))
                 model = model.to(device)
 
                 x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
