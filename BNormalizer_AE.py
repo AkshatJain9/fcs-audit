@@ -11,8 +11,6 @@ from geomloss import SamplesLoss
 from sklearn.mixture import GaussianMixture
 import torch.nn.functional as F
 from itertools import combinations
-# from torchph.pershom import vr_persistence_l1, vr_persistence
-
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
 fluro_channels = ['BUV 395-A', 'BUV737-A', 'Pacific Blue-A', 'FITC-A', 'PerCP-Cy5-5-A', 'PE-A', 'PE-Cy7-A', 'APC-A', 'Alexa Fluor 700-A', 'APC-Cy7-A','BV510-A','BV605-A']
