@@ -580,7 +580,7 @@ if __name__ == "__main__":
 
                 data = get_dataloader(x, ref_labels, 1024)
 
-                model = BNorm_AE(x.shape[1], 2)
+                model = BNorm_AE(x.shape[1], 3)
 
                 model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 model = model.to(device)
