@@ -135,27 +135,27 @@ def train_model(model: nn.Module,
             # Calculate MSE and Sinkhorn loss
             mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
             tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
-            # cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
+            cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
 
 
-            # Randomly sample 100 points for vr_complex_loss
-            # batch_size = x.shape[0]
-            # num_points = min(250, batch_size)  # Ensure we don't sample more than available
-            # indices = torch.randperm(batch_size)[:num_points]
+            # Randomly sample 250 points for vr_complex_loss
+            batch_size = x.shape[0]
+            num_points = min(250, batch_size)  # Ensure we don't sample more than available
+            indices = torch.randperm(batch_size)[:num_points]
 
-            # # Sample the data
-            # x_sampled = x[indices, 6:]
-            # latent_sampled = latent[indices]
+            # Sample the data
+            x_sampled = x[indices, 6:]
+            latent_sampled = latent[indices]
 
             # Compute vr_complex_loss with the sampled data
-            # vr_complex_loss_val = vr_complex_loss_clusters(x_sampled, latent_sampled, batch[1][indices])
+            vr_complex_loss_val = vr_complex_loss_clusters(x_sampled, latent_sampled, batch[1][indices])
             # vr_complex_loss_val = spread_loss(latent, batch[1])
             # vr_complex_loss_val = spread_loss(latent, batch[1])
             
             # Total loss
-            # total_loss_ae = 0.9 * (0.3 * mse_loss_ae + 0.7 * tvd_loss_val) + 0.1 * cluster_align_loss
-            # total_loss_ae = 0.8 * total_loss_ae + 0.2 * vr_complex_loss_val
-            total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
+            total_loss_ae = 0.9 * (0.3 * mse_loss_ae + 0.7 * tvd_loss_val) + 0.1 * cluster_align_loss
+            total_loss_ae = 0.8 * total_loss_ae + 0.2 * vr_complex_loss_val
+            # total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
             # total_loss_ae = mse_loss_ae + vr_complex_loss_val
             total_loss_ae.backward()
             optimizer.step()
@@ -165,8 +165,8 @@ def train_model(model: nn.Module,
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
             total_tvd_loss += tvd_loss_val.item()
-            # total_cluster_align_loss += cluster_align_loss.item()
-            # total_vr_complex_loss += vr_complex_loss_val.item()
+            total_cluster_align_loss += cluster_align_loss.item()
+            total_vr_complex_loss += vr_complex_loss_val.item()
         
         # Calculate average losses
         avg_loss = total_loss / total_samples
@@ -563,9 +563,9 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 if __name__ == "__main__":
     train_models = True
     show_result = False
-    batches_to_run = ["Plate 19635 _CD8", "Plate 27902_N"]
+    batches_to_run = ["Panel1"]
     p_values = None
-    folder_path = "S_3"
+    folder_path = "VR"
 
 
     if train_models:
@@ -582,12 +582,12 @@ if __name__ == "__main__":
 
                 model = BNorm_AE(x.shape[1], 2)
 
-                # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
-                # model = model.to(device)
+                model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
+                model = model.to(device)
 
-                model, losses = train_model(model, data, 2000, 0.0001, 0.3, cluster_centres, cluseter_cov)
+                model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
-                torch.save(model.state_dict(), f'{folder_path}/3.0_model_{directory}.pt')
+                torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
             
 
