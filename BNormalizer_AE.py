@@ -160,9 +160,10 @@ def train_model(model: nn.Module,
             # total_loss_ae = mse_loss_ae + vr_complex_loss_val
 
             mse_loss_ae = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
-            vr_complex_loss_val = vr_complex_loss_clusters(x[:, 6:], pred_ae, batch[1])
+            tvd_loss_val = compute_clus_dist_loss(x[:, 6:], pred_ae, cluster_centres, batch[1], sinkhorn_distance)
+            # vr_complex_loss_val = vr_complex_loss_clusters(x[:, 6:], pred_ae, batch[1])
 
-            total_loss_ae = mse_loss_ae + vr_complex_loss_val
+            total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
 
             total_loss_ae.backward()
             optimizer.step()
@@ -171,9 +172,9 @@ def train_model(model: nn.Module,
             total_loss += total_loss_ae.item()
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
-            # total_tvd_loss += tvd_loss_val.item()
+            total_tvd_loss += tvd_loss_val.item()
             # total_cluster_align_loss += cluster_align_loss.item()
-            total_vr_complex_loss += vr_complex_loss_val.item()
+            # total_vr_complex_loss += vr_complex_loss_val.item()
         
         # Calculate average losses
         avg_loss = total_loss / total_samples
@@ -374,22 +375,57 @@ def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batc
     return torch.mean(torch.stack(mean_diff_losses))
 
 
-    # # Step 1: Compute Cholesky decomposition of covariance matrices for faster sampling
-    # L = torch.linalg.cholesky(assigned_covs)  # Shape: (n_samples, n_features, n_features)
 
-    # # Step 2: Sample from standard normal distribution and transform with Cholesky
-    # z = torch.randn(pred_ae.shape, device=pred_ae.device)  # Shape: (n_samples, n_features)
-    
-    # # Step 3: Generate random points using Cholesky decomposition
-    # random_points = assigned_centers + torch.bmm(L, z.unsqueeze(-1)).squeeze(-1)  # Shape: (n_samples, n_features)
+def compute_clus_dist_loss(x, pred_ae, cluster_centeres, batch_labels, sinkhorn_distance):
+    """
+    Compute distances to each cluster center, create histograms for each cluster, and compute the loss.
+    """
 
-    # # Step 4: Compute the MSE loss between pred_ae and the sampled random points
-    # mse_diff = torch.mean((pred_ae - random_points) ** 2, dim=1)
+    x_clus_dist = compute_clus_dist_values(x, cluster_centeres, batch_labels)
+    pred_clus_dist = compute_clus_dist_values(pred_ae, cluster_centeres, batch_labels)
+
+    total_loss = 0.0
+
+    for (x_vals, pred_vals) in zip(x_clus_dist, pred_clus_dist):
+        max_val = max(max(x_vals), max(pred_vals))
+
+        x_hist = generate_hist(x_vals, num_bins=50, min_val=0.0, max_val=max_val)
+        pred_hist = generate_hist(pred_vals, num_bins=50, min_val=0.0, max_val=max_val)
+
+        loss = sinkhorn_distance(x_hist.unsqueeze(0), pred_hist.unsqueeze(0))
+        total_loss += loss
+
+    return total_loss
+
+
+
+def compute_clus_dist_values(data, cluster_centers, batch_labels):
+    """
+    Compute the Mahalanobis distance between each point in the batch and the cluster center it is assigned to.
     
-    # # Compute the average loss across all samples
-    # total_loss = mse_diff.mean()
+    Args:
+    data (torch.Tensor): 2D tensor of shape (n_samples, n_features)
+    cluster_centers (torch.Tensor): 2D tensor of shape (n_clusters, n_features)
+    cluster_covs (torch.Tensor): 3D tensor of shape (n_clusters, n_features, n_features)
+    batch_labels (torch.Tensor): 1D tensor of cluster assignments for each sample
     
-    # return total_loss
+    Returns:
+    tuple: (mahalanobis_distances, histograms)
+        - mahalanobis_distances: 1D tensor of Mahalanobis distances for each sample
+        - histograms: 2D tensor of histograms for each cluster
+    """
+
+    # Compute MSE between each point and its assigned cluster center
+    assigned_centers = cluster_centers[batch_labels]
+    mse = torch.mean((data - assigned_centers)**2, axis=1)
+    
+    # Compute histograms for each cluster
+    values = []
+    for label in range(cluster_centers.shape[0]):
+        cluster_samples = mse[batch_labels == label]
+        values.append(cluster_samples)
+
+    return values
 
 ##################### SPREAD LOSS #####################
 def tvd_loss(pred, target, sinkhorn_distance, num_bins=200):
@@ -568,7 +604,7 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 
 ##################### MAIN #####################
 if __name__ == "__main__":
-    train_models = False
+    train_models = True
     show_result = True
     batches_to_run = ["Panel1"]
     p_values = None
@@ -585,14 +621,14 @@ if __name__ == "__main__":
                 cluster_centres = torch.tensor(ref_centres, dtype=torch.float32).to(device)
                 cluseter_cov = torch.tensor(ref_cov, dtype=torch.float32).to(device)
 
-                data = get_dataloader(x, ref_labels, 1024)
+                data = get_dataloader(x, ref_labels, 8196)
 
                 model = BNorm_AE(x.shape[1], 3)
 
                 # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 # model = model.to(device)
 
-                model, losses = train_model(model, data, 1000, 0.0001, 0.3, cluster_centres, cluseter_cov)
+                model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
