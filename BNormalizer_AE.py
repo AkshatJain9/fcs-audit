@@ -133,8 +133,8 @@ def train_model(model: nn.Module,
             latent = output[1]
             
             # Calculate MSE and Sinkhorn loss
-            mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
-            tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
+            # mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
+            # tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
             # cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
 
 
@@ -156,8 +156,14 @@ def train_model(model: nn.Module,
             # total_loss_ae = 0.9 * (0.3 * mse_loss_ae + 0.7 * tvd_loss_val) + 0.1 * cluster_align_loss
             # total_loss_ae = 0.8 * total_loss_ae + 0.2 * vr_complex_loss_val
             # total_loss_ae = mse_loss_ae + tvd_loss_val + cluster_align_loss + vr_complex_loss_val
-            total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
+            # total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
             # total_loss_ae = mse_loss_ae + vr_complex_loss_val
+
+            mse_loss_ae = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
+            vr_complex_loss_val = vr_complex_loss_clusters(x[:, 6:], pred_ae, batch[1])
+
+            total_loss_ae = mse_loss_ae + vr_complex_loss_val
+
             total_loss_ae.backward()
             optimizer.step()
             
@@ -165,9 +171,9 @@ def train_model(model: nn.Module,
             total_loss += total_loss_ae.item()
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
-            total_tvd_loss += tvd_loss_val.item()
+            # total_tvd_loss += tvd_loss_val.item()
             # total_cluster_align_loss += cluster_align_loss.item()
-            # total_vr_complex_loss += vr_complex_loss_val.item()
+            total_vr_complex_loss += vr_complex_loss_val.item()
         
         # Calculate average losses
         avg_loss = total_loss / total_samples
@@ -566,7 +572,7 @@ if __name__ == "__main__":
     show_result = True
     batches_to_run = ["Panel1"]
     p_values = None
-    folder_path = "VR"
+    folder_path = "Clus"
 
 
     if train_models:
@@ -586,7 +592,7 @@ if __name__ == "__main__":
                 # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 # model = model.to(device)
 
-                model, losses = train_model(model, data, 2000, 0.0001, 0.3, cluster_centres, cluseter_cov)
+                model, losses = train_model(model, data, 1000, 0.0001, 0.3, cluster_centres, cluseter_cov)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
@@ -600,7 +606,7 @@ if __name__ == "__main__":
                 num_cols = x.shape[1]
 
                 model = BNorm_AE(x.shape[1], 3)
-                model.load_state_dict(torch.load(f'{folder_path}/model_{directory}_sinkhorn_clust13.pt', map_location=device))
+                model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device))
                 model = model.to(device)
 
                 x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
