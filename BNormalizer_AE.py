@@ -481,11 +481,16 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
     ]).T
 
 
+def get_clusters(name):
+    if (name == "Plate 27902_N"):
+        return 9
+    return 6
+
 ##################### MAIN #####################
 if __name__ == "__main__":
     train_models = True
     show_result = False
-    batches_to_run = ["Panel1"]
+    batches_to_run = ["Panel1", "Plate 19635 _CD8", "Plate 27902_N"]
     folder_path = "FINAL"
 
 
@@ -495,7 +500,7 @@ if __name__ == "__main__":
                 print(f"-------- TRAINING FOR {directory} -----------")
    
                 x = load_data(directory)
-                ref_labels = get_main_cell_pops(x[:, 6:], 6)
+                ref_labels = get_main_cell_pops(x[:, 6:], get_clusters(directory))
 
                 # data = get_dataloader(x, ref_labels, 8196)
                 # model = BNorm_AE(x.shape[1], 3)
@@ -506,7 +511,7 @@ if __name__ == "__main__":
                 # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 # model = model.to(device)
 
-                model, losses = train_model(model, data, 200, 0.0001)
+                model, losses = train_model(model, data, 500, 0.0001)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
