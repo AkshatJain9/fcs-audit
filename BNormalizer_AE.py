@@ -673,7 +673,7 @@ if __name__ == "__main__":
                 # model = BNorm_AE(x.shape[1], 3)
 
                 data = get_dataloader(x[:, 6:], ref_labels, 1024)
-                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 12)
+                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 48)
 
                 # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 # model = model.to(device)
@@ -692,7 +692,7 @@ if __name__ == "__main__":
                 num_cols = x.shape[1]
 
                 # model = BNorm_AE(x.shape[1], 3)
-                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 6)
+                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 48)
                 model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device))
                 model = model.to(device)
 
