@@ -91,6 +91,53 @@ class BNorm_AE(nn.Module):
             y = self.up3(y)
             return y
         
+class BNorm_AE_Overcomplete(nn.Module):
+    def __init__(self, ch_count, increase_dims):
+        super(BNorm_AE_Overcomplete, self).__init__()
+
+        self.up1 = nn.Linear(in_features=(ch_count), out_features=(ch_count + (increase_dims // 3)))
+        self.up2 = nn.Linear(in_features=(ch_count + (increase_dims // 3)), out_features=(ch_count + (2 * increase_dims // 3)))
+        self.up3 = nn.Linear(in_features=(ch_count + (2 * increase_dims // 3)), out_features=(ch_count + increase_dims))
+
+        self.down1 = nn.Linear(in_features=(ch_count + increase_dims), out_features=(ch_count + (2 * increase_dims // 3)))
+        self.down2 = nn.Linear(in_features=(ch_count + (2 * increase_dims // 3)), out_features=(ch_count + (increase_dims // 3)))
+        self.down3 = nn.Linear(in_features=(ch_count + (increase_dims // 3)), out_features=(ch_count))
+
+        self.relu = nn.ReLU(inplace=True)
+
+
+    def forward(self, input_data):
+        x = self.up1(input_data)
+        x = self.relu(x)
+        x = self.up2(x)
+        x = self.relu(x)
+        x = self.up3(x)
+
+        y = self.down1(x)
+        y = self.relu(y)
+        y = self.down2(y)
+        y = self.relu(y)
+        y = self.down3(y)
+        return y, x
+    
+    def encode(self, input_data):
+        with torch.no_grad():
+            x = self.up1(input_data)
+            x = self.relu(x)
+            x = self.up2(x)
+            x = self.relu(x)
+            x = self.up3(x)
+            return x
+        
+    def decode(self, input_data):
+        with torch.no_grad():
+            y = self.down1(input_data)
+            y = self.relu(y)
+            y = self.down2(y)
+            y = self.relu(y)
+            y = self.down3(y)
+            return y
+        
 
 def train_model(model: nn.Module, 
                 data_loader: torch.utils.data.DataLoader, 
@@ -133,7 +180,7 @@ def train_model(model: nn.Module,
             latent = output[1]
             
             # Calculate MSE and Sinkhorn loss
-            # mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
+            mse_loss_ae = mse_loss(pred_ae, x)
             # tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
             # cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
 
@@ -159,11 +206,12 @@ def train_model(model: nn.Module,
             # total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
             # total_loss_ae = mse_loss_ae + vr_complex_loss_val
 
-            mse_loss_ae = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
-            tvd_loss_val = compute_clus_dist_loss(x[:, 6:], pred_ae, cluster_centres, batch[1], sinkhorn_distance)
+            # mse_loss_ae = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
+            # tvd_loss_val = compute_clus_dist_loss(x[:, 6:], pred_ae, cluster_centres, batch[1], sinkhorn_distance)
             # vr_complex_loss_val = vr_complex_loss_clusters(x[:, 6:], pred_ae, batch[1])
 
-            total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
+            # total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
+            total_loss_ae = mse_loss_ae
 
             total_loss_ae.backward()
             optimizer.step()
@@ -172,7 +220,7 @@ def train_model(model: nn.Module,
             total_loss += total_loss_ae.item()
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
-            total_tvd_loss += tvd_loss_val.item()
+            # total_tvd_loss += tvd_loss_val.item()
             # total_cluster_align_loss += cluster_align_loss.item()
             # total_vr_complex_loss += vr_complex_loss_val.item()
         
@@ -608,7 +656,7 @@ if __name__ == "__main__":
     show_result = True
     batches_to_run = ["Panel1"]
     p_values = None
-    folder_path = "Clus"
+    folder_path = "OC"
 
 
     if train_models:
@@ -621,9 +669,11 @@ if __name__ == "__main__":
                 cluster_centres = torch.tensor(ref_centres, dtype=torch.float32).to(device)
                 cluseter_cov = torch.tensor(ref_cov, dtype=torch.float32).to(device)
 
-                data = get_dataloader(x, ref_labels, 8196)
+                # data = get_dataloader(x, ref_labels, 8196)
+                # model = BNorm_AE(x.shape[1], 3)
 
-                model = BNorm_AE(x.shape[1], 3)
+                data = get_dataloader(x[:, 6:], ref_labels, 1024)
+                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 12)
 
                 # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 # model = model.to(device)
@@ -641,11 +691,12 @@ if __name__ == "__main__":
                 x = load_data(directory)
                 num_cols = x.shape[1]
 
-                model = BNorm_AE(x.shape[1], 3)
+                # model = BNorm_AE(x.shape[1], 3)
+                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 6)
                 model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device))
                 model = model.to(device)
 
-                x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
+                x_tensor = torch.tensor(x[:, 6:], dtype=torch.float32).to(device)
 
                 x_transformed = model(x_tensor)[0].cpu().detach().numpy()  
                 x_transformed = np.hstack((x[:, :6], x_transformed))
