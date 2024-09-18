@@ -484,10 +484,9 @@ def get_np_array_from_sample(sample: fk.Sample, subsample: bool) -> np.ndarray:
 ##################### MAIN #####################
 if __name__ == "__main__":
     train_models = True
-    show_result = True
+    show_result = False
     batches_to_run = ["Panel1"]
-    p_values = None
-    folder_path = "OC"
+    folder_path = "FINAL"
 
 
     if train_models:
@@ -496,7 +495,7 @@ if __name__ == "__main__":
                 print(f"-------- TRAINING FOR {directory} -----------")
    
                 x = load_data(directory)
-                ref_labels = get_main_cell_pops(x[:, 6:], 12)
+                ref_labels = get_main_cell_pops(x[:, 6:], 6)
 
                 # data = get_dataloader(x, ref_labels, 8196)
                 # model = BNorm_AE(x.shape[1], 3)
