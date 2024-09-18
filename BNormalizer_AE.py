@@ -142,10 +142,7 @@ class BNorm_AE_Overcomplete(nn.Module):
 def train_model(model: nn.Module, 
                 data_loader: torch.utils.data.DataLoader, 
                 epoch_count: int, 
-                learning_rate: float, 
-                p: float, 
-                cluster_centres: torch.Tensor, 
-                cluster_cov: torch.Tensor) -> np.ndarray:
+                learning_rate: float) -> np.ndarray:
     print("##### STARTING TRAINING OF MODEL #####")
     model.train()
     model.to(device)
@@ -279,7 +276,7 @@ def topological_loss(A_X, A_Z, pi_X, pi_Z):
 ##################### CLUSTER LOSS #####################
 def get_main_cell_pops(data, k):
     gmm = GaussianMixture(n_components=k, random_state=0).fit(data)
-    return gmm.means_, gmm.covariances_, gmm.predict(data)
+    return gmm.predict(data)
 
 
 def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batch_labels):
@@ -499,9 +496,7 @@ if __name__ == "__main__":
                 print(f"-------- TRAINING FOR {directory} -----------")
    
                 x = load_data(directory)
-                ref_centres, ref_cov, ref_labels = get_main_cell_pops(x[:, 6:], 12)
-                cluster_centres = torch.tensor(ref_centres, dtype=torch.float32).to(device)
-                cluseter_cov = torch.tensor(ref_cov, dtype=torch.float32).to(device)
+                ref_labels = get_main_cell_pops(x[:, 6:], 12)
 
                 # data = get_dataloader(x, ref_labels, 8196)
                 # model = BNorm_AE(x.shape[1], 3)
@@ -512,7 +507,7 @@ if __name__ == "__main__":
                 # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 # model = model.to(device)
 
-                model, losses = train_model(model, data, 200, 0.0001, 0.3, cluster_centres, cluseter_cov)
+                model, losses = train_model(model, data, 200, 0.0001)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
