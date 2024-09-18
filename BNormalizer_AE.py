@@ -159,7 +159,6 @@ def train_model(model: nn.Module,
     mse_losses = []
     tvd_losses = []
     cluster_align_losses = []
-    vr_complex_losses = []
     
     for epoch in range(epoch_count):
         total_loss = 0.0
@@ -167,7 +166,6 @@ def train_model(model: nn.Module,
         total_mse_loss = 0.0
         total_tvd_loss = 0.0
         total_cluster_align_loss = 0.0
-        total_vr_complex_loss = 0.0
         
         for batch in data_loader:
             x = batch[0]
@@ -182,36 +180,10 @@ def train_model(model: nn.Module,
             # Calculate MSE and Sinkhorn loss
             mse_loss_ae = mse_loss(pred_ae, x)
             tvd_loss_val = tvd_loss(pred_ae, x, sinkhorn_distance)
-            cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
-
-
-            # Randomly sample 250 points for vr_complex_loss
-            # batch_size = x.shape[0]
-            # num_points = min(250, batch_size)  # Ensure we don't sample more than available
-            # indices = torch.randperm(batch_size)[:num_points]
-
-            # # Sample the data
-            # x_sampled = x[indices, 6:]
-            # latent_sampled = latent[indices]
-
-            # Compute vr_complex_loss with the sampled data
-            # vr_complex_loss_val = vr_complex_loss_clusters(x_sampled, latent_sampled, batch[1][indices])
-            # vr_complex_loss_val = spread_loss(latent, batch[1])
-            # vr_complex_loss_val = spread_loss(latent, batch[1])
-            
-            # Total loss
-            # total_loss_ae = 0.9 * (0.3 * mse_loss_ae + 0.7 * tvd_loss_val) + 0.1 * cluster_align_loss
-            # total_loss_ae = 0.8 * total_loss_ae + 0.2 * vr_complex_loss_val
-            # total_loss_ae = mse_loss_ae + tvd_loss_val + cluster_align_loss + vr_complex_loss_val
-            # total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
-            # total_loss_ae = mse_loss_ae + vr_complex_loss_val
-
-            # mse_loss_ae = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
-            # tvd_loss_val = compute_clus_dist_loss(x[:, 6:], pred_ae, cluster_centres, batch[1], sinkhorn_distance)
-            # vr_complex_loss_val = vr_complex_loss_clusters(x[:, 6:], pred_ae, batch[1])
+            # cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
 
             total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
-            total_loss_ae = 0.9 * total_loss_ae + 0.1 * cluster_align_loss
+            # total_loss_ae = 0.9 * total_loss_ae + 0.1 * cluster_align_loss
             # total_loss_ae = mse_loss_ae
 
             total_loss_ae.backward()
@@ -222,28 +194,24 @@ def train_model(model: nn.Module,
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
             total_tvd_loss += tvd_loss_val.item()
-            total_cluster_align_loss += cluster_align_loss.item()
-            # total_vr_complex_loss += vr_complex_loss_val.item()
+            # total_cluster_align_loss += cluster_align_loss.item()
         
         # Calculate average losses
         avg_loss = total_loss / total_samples
         avg_mse_loss = total_mse_loss / total_samples
         avg_tvd_loss = total_tvd_loss / total_samples
         avg_cluster_align_loss = total_cluster_align_loss / total_samples
-        avg_vr_complex_loss = total_vr_complex_loss / total_samples
         
         # Append losses to lists
         total_losses.append(avg_loss)
         mse_losses.append(avg_mse_loss)
         tvd_losses.append(avg_tvd_loss)
         cluster_align_losses.append(avg_cluster_align_loss)
-        vr_complex_losses.append(avg_vr_complex_loss)
         
         print(f'Epoch: {epoch} Loss per unit: {avg_loss}')
         print(f'Epoch: {epoch} MSE Loss per unit: {avg_mse_loss}')
         print(f'Epoch: {epoch} TVD Loss per unit: {avg_tvd_loss}')
         print(f'Epoch: {epoch} Cluster Alignment Loss per unit: {avg_cluster_align_loss}')
-        print(f'Epoch: {epoch} VR Complex Loss per unit: {avg_vr_complex_loss}')
         print("--------------------------------------------------")
     
     print("##### FINISHED TRAINING OF MODEL #####")
@@ -474,7 +442,7 @@ if __name__ == "__main__":
                 print(f"-------- TRAINING FOR {directory} -----------")
    
                 x = load_data(directory)
-                ref_centres, ref_cov, ref_labels = get_main_cell_pops(x[:, 6:], 13)
+                ref_centres, ref_cov, ref_labels = get_main_cell_pops(x[:, 6:], 6)
                 cluster_centres = torch.tensor(ref_centres, dtype=torch.float32).to(device)
                 cluseter_cov = torch.tensor(ref_cov, dtype=torch.float32).to(device)
 
@@ -482,7 +450,7 @@ if __name__ == "__main__":
                 # model = BNorm_AE(x.shape[1], 3)
 
                 data = get_dataloader(x[:, 6:], ref_labels, 1024)
-                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 48)
+                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 24)
 
                 # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 # model = model.to(device)
@@ -501,7 +469,7 @@ if __name__ == "__main__":
                 num_cols = x.shape[1]
 
                 # model = BNorm_AE(x.shape[1], 3)
-                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 48)
+                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 24)
                 model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device))
                 model = model.to(device)
 
