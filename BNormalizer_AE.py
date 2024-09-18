@@ -181,8 +181,8 @@ def train_model(model: nn.Module,
             
             # Calculate MSE and Sinkhorn loss
             mse_loss_ae = mse_loss(pred_ae, x)
-            # tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
-            # cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
+            tvd_loss_val = tvd_loss(pred_ae, x, sinkhorn_distance)
+            cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
 
 
             # Randomly sample 250 points for vr_complex_loss
@@ -210,8 +210,9 @@ def train_model(model: nn.Module,
             # tvd_loss_val = compute_clus_dist_loss(x[:, 6:], pred_ae, cluster_centres, batch[1], sinkhorn_distance)
             # vr_complex_loss_val = vr_complex_loss_clusters(x[:, 6:], pred_ae, batch[1])
 
-            # total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
-            total_loss_ae = mse_loss_ae
+            total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
+            total_loss_ae = 0.9 * total_loss_ae + 0.1 * cluster_align_loss
+            # total_loss_ae = mse_loss_ae
 
             total_loss_ae.backward()
             optimizer.step()
@@ -220,8 +221,8 @@ def train_model(model: nn.Module,
             total_loss += total_loss_ae.item()
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
-            # total_tvd_loss += tvd_loss_val.item()
-            # total_cluster_align_loss += cluster_align_loss.item()
+            total_tvd_loss += tvd_loss_val.item()
+            total_cluster_align_loss += cluster_align_loss.item()
             # total_vr_complex_loss += vr_complex_loss_val.item()
         
         # Calculate average losses
@@ -248,146 +249,6 @@ def train_model(model: nn.Module,
     print("##### FINISHED TRAINING OF MODEL #####")
     return model, np.vstack((total_losses, mse_losses, tvd_losses, cluster_align_losses))
 
-
-
-############ VR-Complex LOSS ############
-
-
-def vr_complex_loss_clusters(x, latent, labels):
-    """
-    Compute the topological loss between the input data x and the latent representations latent but only within clusters.
-    Args:
-    x: Input data tensor of shape (batch_size, num_features)
-    latent: Latent representations tensor of shape (batch_size, latent_dim)
-    labels: Cluster assignments for each sample
-    Returns:
-    loss: The topological loss (torch.Tensor)
-    """
-    # Compute pairwise distance matrices
-    x_dists = torch.cdist(x, x)  # Shape: (batch_size, batch_size)
-    latent_dists = torch.cdist(latent, latent)
-
-    labels = labels.cpu().numpy()
-    # Group indices by label
-    label_rows = {}
-    for i, label in enumerate(labels):
-        label_rows.setdefault(label, []).append(i)
-
-    # Generate pairs of indices within each cluster
-    indices = [pair for cluster in label_rows.values() for pair in combinations(cluster, 2)]
-    indices = np.array(indices)
-    
-
-    # Compute loss using the indices
-    loss = topological_loss(x_dists, latent_dists, indices, indices)
-    return loss
-
-
-def vr_complex_loss(x, latent):
-    """
-    Compute the topological loss between the input data x and the latent representations latent.
-
-    Args:
-        x: Input data tensor of shape (batch_size, num_features)
-        latent: Latent representations tensor of shape (batch_size, latent_dim)
-
-    Returns:
-        loss: The topological loss (torch.Tensor)
-    """
-    # Compute pairwise distance matrices
-    x_dists = torch.cdist(x, x)  # Shape: (batch_size, batch_size)
-    latent_dists = torch.cdist(latent, latent)
-
-    # Compute persistence diagrams
-    # ret_x = vr_persistence(x_dists, max_dimension=1)
-    # ret_latent = vr_persistence(latent_dists, max_dimension=1)
-
-    # pi_X = ret_x[0][0]
-    # pi_Z = ret_latent[0][0]
-
-    sorted_indicies_x = get_sorted_indices(x_dists)
-    sorted_indicies_latent = get_sorted_indices(latent_dists)
-
-    # Compute the topological loss
-    loss = topological_loss(x_dists, latent_dists, sorted_indicies_x, sorted_indicies_latent)
-
-    return loss
-
-
-def get_sorted_indices(A):
-    """
-    Given a symmetric 2D PyTorch tensor A, return a list of [row, col] indices,
-    sorted in ascending order based on the values at these indices,
-    excluding the diagonal entries.
-    """
-    # Get the indices of the upper triangle, excluding the diagonal
-    indices = torch.triu_indices(A.size(0), A.size(1), offset=1).to(device)
-    # Extract the values at these indices
-    values = A[indices[0], indices[1]]
-    # Sort the values and get the indices that would sort the array
-    sorted_indices = torch.argsort(values)
-    # Reorder the row and column indices accordingly
-    sorted_row_indices = indices[0][sorted_indices]
-    sorted_col_indices = indices[1][sorted_indices]
-    # Combine row and column indices into a list of lists
-    sorted_indices_list = [ [row, col] for row, col in zip(sorted_row_indices.tolist(), sorted_col_indices.tolist()) ]
-    return np.array(sorted_indices_list)
-
-def topological_loss(A_X, A_Z, pi_X, pi_Z):
-    """
-    A_X: Distance matrix for input space X (torch.Tensor)
-    A_Z: Distance matrix for latent space Z (torch.Tensor)
-    pi_X: Persistence pairings for X
-    pi_Z: Persistence pairings for Z
-    """
-    # Subset the distance matrices using the persistence pairings
-    # Retrieve the topologically relevant distances using the pairings
-    # pi_X = torch.nonzero(A_X.unsqueeze(1) == pi_X[:, 1].unsqueeze(0), as_tuple=False)
-    # pi_Z = torch.nonzero(A_Z.unsqueeze(1) == pi_Z[:, 1].unsqueeze(0), as_tuple=False)
-
-    A_X_pi_X = A_X[pi_X[:, 0], pi_X[:, 1]]  # Subset A_X using edges from pi_X
-    A_Z_pi_X = A_Z[pi_X[:, 0], pi_X[:, 1]]  # Subset A_Z using same edges from pi_X
-
-    A_Z_pi_Z = A_Z[pi_Z[:, 0], pi_Z[:, 1]]  # Subset A_Z using edges from pi_Z
-    A_X_pi_Z = A_X[pi_Z[:, 0], pi_Z[:, 1]]  # Subset A_X using same edges from pi_Z
-    
-    # Calculate the L2 loss terms (differences between the selected distances)
-    L_X_to_Z = torch.mean((A_X_pi_X - A_Z_pi_X) ** 2)
-    L_Z_to_X = torch.mean((A_Z_pi_Z - A_X_pi_Z) ** 2)
-    
-    # Total topological loss
-    Lt = 0.5 * (L_X_to_Z + L_Z_to_X)
-    
-    return Lt
-
-################ SPREAD LOSS ################
-def spread_loss(latent_embeddings, labels, min_variance=0.10):
-    """
-    Computes a spread loss that penalizes clusters whose variance in the latent space is too small.
-    Args:
-        latent_embeddings (torch.Tensor): Latent space representations of the data.
-        labels (torch.Tensor): Cluster assignments for each sample.
-        min_variance (float): Minimum allowable variance for each cluster.
-
-    Returns:
-        torch.Tensor: The spread loss to ensure variance in latent space is not too small.
-    """
-    unique_labels = labels.unique()
-    spread_loss_value = 0.0
-    
-    for label in unique_labels:
-        # Get the embeddings for the current cluster
-        cluster_points = latent_embeddings[labels == label]
-        
-        if len(cluster_points) > 1:
-            # Compute the variance of the points in this cluster
-            cluster_variance = torch.var(cluster_points, dim=0)
-            
-            # Penalize clusters whose variance is too small
-            variance_penalty = F.relu(min_variance - cluster_variance).mean()
-            spread_loss_value += variance_penalty
-    
-    return spread_loss_value / len(unique_labels)  # Average across clusters
 
 
 ##################### CLUSTER LOSS #####################
@@ -422,58 +283,6 @@ def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batc
     # Compute simple MSE to cluster centers
     return torch.mean(torch.stack(mean_diff_losses))
 
-
-
-def compute_clus_dist_loss(x, pred_ae, cluster_centeres, batch_labels, sinkhorn_distance):
-    """
-    Compute distances to each cluster center, create histograms for each cluster, and compute the loss.
-    """
-
-    x_clus_dist = compute_clus_dist_values(x, cluster_centeres, batch_labels)
-    pred_clus_dist = compute_clus_dist_values(pred_ae, cluster_centeres, batch_labels)
-
-    total_loss = 0.0
-
-    for (x_vals, pred_vals) in zip(x_clus_dist, pred_clus_dist):
-        max_val = max(max(x_vals), max(pred_vals))
-
-        x_hist = generate_hist(x_vals, num_bins=50, min_val=0.0, max_val=max_val)
-        pred_hist = generate_hist(pred_vals, num_bins=50, min_val=0.0, max_val=max_val)
-
-        loss = sinkhorn_distance(x_hist.unsqueeze(0), pred_hist.unsqueeze(0))
-        total_loss += loss
-
-    return total_loss
-
-
-
-def compute_clus_dist_values(data, cluster_centers, batch_labels):
-    """
-    Compute the Mahalanobis distance between each point in the batch and the cluster center it is assigned to.
-    
-    Args:
-    data (torch.Tensor): 2D tensor of shape (n_samples, n_features)
-    cluster_centers (torch.Tensor): 2D tensor of shape (n_clusters, n_features)
-    cluster_covs (torch.Tensor): 3D tensor of shape (n_clusters, n_features, n_features)
-    batch_labels (torch.Tensor): 1D tensor of cluster assignments for each sample
-    
-    Returns:
-    tuple: (mahalanobis_distances, histograms)
-        - mahalanobis_distances: 1D tensor of Mahalanobis distances for each sample
-        - histograms: 2D tensor of histograms for each cluster
-    """
-
-    # Compute MSE between each point and its assigned cluster center
-    assigned_centers = cluster_centers[batch_labels]
-    mse = torch.mean((data - assigned_centers)**2, axis=1)
-    
-    # Compute histograms for each cluster
-    values = []
-    for label in range(cluster_centers.shape[0]):
-        cluster_samples = mse[batch_labels == label]
-        values.append(cluster_samples)
-
-    return values
 
 ##################### SPREAD LOSS #####################
 def tvd_loss(pred, target, sinkhorn_distance, num_bins=200):
@@ -532,7 +341,7 @@ def generate_hist(feature_values, num_bins, min_val, max_val):
     
     # Softmax-like bin assignment
     distances = torch.abs(feature_values_expanded - bin_centers_expanded)
-    bin_probs = torch.exp(-distances / (0.5 * bin_width))
+    bin_probs = torch.exp(-distances / (2 * bin_width))
     
     # Normalize bin probabilities
     bin_probs_sum = bin_probs.sum(dim=0)
