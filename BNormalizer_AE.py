@@ -180,11 +180,10 @@ def train_model(model: nn.Module,
             # Calculate MSE and Sinkhorn loss
             mse_loss_ae = mse_loss(pred_ae, x)
             tvd_loss_val = tvd_loss(pred_ae, x, sinkhorn_distance)
-            # cluster_align_loss = assign_clusters_and_compute_mse(pred_ae, cluster_centres, cluster_cov, batch[1])
+            cluster_align_loss = vr_complex_loss_clusters(x, latent, batch[1])
 
             total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
-            # total_loss_ae = 0.9 * total_loss_ae + 0.1 * cluster_align_loss
-            # total_loss_ae = mse_loss_ae
+            total_loss_ae = 0.9 * total_loss_ae + 0.1 * cluster_align_loss
 
             total_loss_ae.backward()
             optimizer.step()
@@ -194,7 +193,7 @@ def train_model(model: nn.Module,
             total_samples += x.size(0)
             total_mse_loss += mse_loss_ae.item()
             total_tvd_loss += tvd_loss_val.item()
-            # total_cluster_align_loss += cluster_align_loss.item()
+            total_cluster_align_loss += cluster_align_loss.item()
         
         # Calculate average losses
         avg_loss = total_loss / total_samples
@@ -217,6 +216,64 @@ def train_model(model: nn.Module,
     print("##### FINISHED TRAINING OF MODEL #####")
     return model, np.vstack((total_losses, mse_losses, tvd_losses, cluster_align_losses))
 
+
+
+############ VR-Complex LOSS ############
+def vr_complex_loss_clusters(x, latent, labels):
+    """
+    Compute the topological loss between the input data x and the latent representations latent but only within clusters.
+    Args:
+    x: Input data tensor of shape (batch_size, num_features)
+    latent: Latent representations tensor of shape (batch_size, latent_dim)
+    labels: Cluster assignments for each sample
+    Returns:
+    loss: The topological loss (torch.Tensor)
+    """
+    # Compute pairwise distance matrices
+    x_dists = torch.cdist(x, x)  # Shape: (batch_size, batch_size)
+    latent_dists = torch.cdist(latent, latent)
+
+    labels = labels.cpu().numpy()
+    # Group indices by label
+    label_rows = {}
+    for i, label in enumerate(labels):
+        label_rows.setdefault(label, []).append(i)
+
+    # Generate pairs of indices within each cluster
+    indices = [pair for cluster in label_rows.values() for pair in combinations(cluster, 2)]
+    indices = np.array(indices)
+    
+
+    # Compute loss using the indices
+    loss = topological_loss(x_dists, latent_dists, indices, indices)
+    return loss
+
+def topological_loss(A_X, A_Z, pi_X, pi_Z):
+    """
+    A_X: Distance matrix for input space X (torch.Tensor)
+    A_Z: Distance matrix for latent space Z (torch.Tensor)
+    pi_X: Persistence pairings for X
+    pi_Z: Persistence pairings for Z
+    """
+    # Subset the distance matrices using the persistence pairings
+    # Retrieve the topologically relevant distances using the pairings
+    # pi_X = torch.nonzero(A_X.unsqueeze(1) == pi_X[:, 1].unsqueeze(0), as_tuple=False)
+    # pi_Z = torch.nonzero(A_Z.unsqueeze(1) == pi_Z[:, 1].unsqueeze(0), as_tuple=False)
+
+    A_X_pi_X = A_X[pi_X[:, 0], pi_X[:, 1]]  # Subset A_X using edges from pi_X
+    A_Z_pi_X = A_Z[pi_X[:, 0], pi_X[:, 1]]  # Subset A_Z using same edges from pi_X
+
+    A_Z_pi_Z = A_Z[pi_Z[:, 0], pi_Z[:, 1]]  # Subset A_Z using edges from pi_Z
+    A_X_pi_Z = A_X[pi_Z[:, 0], pi_Z[:, 1]]  # Subset A_X using same edges from pi_Z
+    
+    # Calculate the L2 loss terms (differences between the selected distances)
+    L_X_to_Z = torch.mean((A_X_pi_X - A_Z_pi_X) ** 2)
+    L_Z_to_X = torch.mean((A_Z_pi_Z - A_X_pi_Z) ** 2)
+    
+    # Total topological loss
+    Lt = 0.5 * (L_X_to_Z + L_Z_to_X)
+    
+    return Lt
 
 
 ##################### CLUSTER LOSS #####################
@@ -442,7 +499,7 @@ if __name__ == "__main__":
                 print(f"-------- TRAINING FOR {directory} -----------")
    
                 x = load_data(directory)
-                ref_centres, ref_cov, ref_labels = get_main_cell_pops(x[:, 6:], 6)
+                ref_centres, ref_cov, ref_labels = get_main_cell_pops(x[:, 6:], 12)
                 cluster_centres = torch.tensor(ref_centres, dtype=torch.float32).to(device)
                 cluseter_cov = torch.tensor(ref_cov, dtype=torch.float32).to(device)
 
@@ -450,7 +507,7 @@ if __name__ == "__main__":
                 # model = BNorm_AE(x.shape[1], 3)
 
                 data = get_dataloader(x[:, 6:], ref_labels, 1024)
-                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 16)
+                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 24)
 
                 # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
                 # model = model.to(device)
@@ -469,7 +526,7 @@ if __name__ == "__main__":
                 num_cols = x.shape[1]
 
                 # model = BNorm_AE(x.shape[1], 3)
-                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 16)
+                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 24)
                 model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device))
                 model = model.to(device)
 
