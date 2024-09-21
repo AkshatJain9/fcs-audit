@@ -488,8 +488,8 @@ def get_clusters(name):
 
 ##################### MAIN #####################
 if __name__ == "__main__":
-    train_models = True
-    show_result = False
+    train_models = False
+    show_result = True
     batches_to_run = ["Panel1", "Plate 19635 _CD8", "Plate 27902_N"]
     folder_path = "FINAL"
 
