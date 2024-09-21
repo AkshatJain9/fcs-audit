@@ -1,11 +1,15 @@
-from BNormalizer_AE import BNorm_AE
 import numpy as np
 from sklearn.cluster import KMeans
 from scipy.optimize import linear_sum_assignment
+import torch.nn as nn
+import torch
 
-def bnormalizer_ae_kmeans(bnormalizer: BNorm_AE, ref_batch: np.ndarray, target_batches: dict, n_clusters: int = 5):
-    ref_batch_encoded = bnormalizer.encode(ref_batch)
-    target_batches_encoded = {key: bnormalizer.encode(target_batch) for key, target_batch in target_batches.items()}
+def bnormalizer_ae_kmeans(bnormalizer: nn.Module, ref_batch: torch.Tensor, target_batches: dict, n_clusters: int = 5):
+    device = next(bnormalizer.parameters()).device
+    
+    ref_batch_encoded = bnormalizer.encode(ref_batch.to(device)).detach().cpu().numpy()
+    target_batches_encoded = {key: bnormalizer.encode(target_batch.to(device)).detach().cpu().numpy()
+                              for key, target_batch in target_batches.items()}
 
     # Perform K-means clustering on reference batch
     ref_kmeans = KMeans(n_clusters=n_clusters, random_state=42)
@@ -36,6 +40,6 @@ def bnormalizer_ae_kmeans(bnormalizer: BNorm_AE, ref_batch: np.ndarray, target_b
             transformed_batch[mask] = target_batch_encoded[mask] + shift
 
         # Decode the transformed batch
-        normalised_batches[key] = bnormalizer.decode(transformed_batch)
+        normalised_batches[key] = bnormalizer.decode(torch.from_numpy(transformed_batch).float().to(device)).detach().cpu().numpy()
 
     return normalised_batches

@@ -12,6 +12,13 @@ from sklearn.mixture import GaussianMixture
 import torch.nn.functional as F
 from itertools import combinations
 
+from BNormalizer_AE_Id import bnormalizer_ae_identity
+from BNormalizer_AE_LL import bnormalizer_ae_linear
+from BNormalizer_AE_SplineFn import bnormalizer_ae_splinefn
+from BNormalizer_AE_ClusAlign import bnormalizer_ae_kmeans
+from BNormalizer_AE_EmpBayes import bnormalizer_ae_combat
+from BNormalizer_AE_MNN import bnormalizer_ae_mnn
+
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
 fluro_channels = ['BUV 395-A', 'BUV737-A', 'Pacific Blue-A', 'FITC-A', 'PerCP-Cy5-5-A', 'PE-A', 'PE-Cy7-A', 'APC-A', 'Alexa Fluor 700-A', 'APC-Cy7-A','BV510-A','BV605-A']
 new_channels = ['APC-Alexa 750 / APC-Cy7-A', 'Alexa 405 / Pac Blue-A', 'Qdot 605-A']
@@ -385,6 +392,10 @@ def load_data(panel: str, load_full: bool = False) -> np.ndarray:
     """
     if (not load_data and os.path.exists(somepath + panel + ".npy")):
         return np.load(somepath + panel + ".npy")
+    
+    full_dir = somepath + "full" + ("/" if platform.system() != "Windows" else "\\")
+    if (load_data and os.path.exists(full_dir + panel + ".npy")):
+        return np.load(full_dir + panel + ".npy")
 
     if (platform.system() == "Windows"):
         full_panel = somepath + panel + "\\"
@@ -408,10 +419,13 @@ def load_data(panel: str, load_full: bool = False) -> np.ndarray:
         else:
             sample.apply_compensation(sample.metadata['spill'])
         sample.apply_transform(transform)
-        fcs_files_np.append(get_np_array_from_sample(sample, subsample=True))
+        fcs_files_np.append(get_np_array_from_sample(sample, subsample=(not load_full)))
 
     res = np.vstack(fcs_files_np)
-    np.save(somepath + panel + ".npy", res)
+    if (not load_full):
+        np.save(somepath + panel + ".npy", res)
+    else:
+        np.save(full_dir + panel + ".npy", res)
     return res
 
 
@@ -486,13 +500,36 @@ def get_clusters(name):
         return 9
     return 6
 
+
+def recombine_data(data_orig: dict, data_normalised: dict):
+    # For each key in data_orig, get first 6 columns and append the normalised data
+    res = dict()
+    for key, value in data_orig.items():
+        res[key] = np.hstack((value[:, :6], data_normalised[key]))
+    return res
+
+def make_dir_results(method, directory):
+    try:
+        os.mkdir(f'./results/{method}/{directory}')
+    except:
+        pass
+
+
 ##################### MAIN #####################
 if __name__ == "__main__":
     train_models = False
-    show_result = True
-    batches_to_run = ["Panel1", "Plate 19635 _CD8", "Plate 27902_N"]
+    show_result = False
+    compute_normalise = True
+    # batches_to_run = ["Panel1", "Plate 19635 _CD8", "Plate 27902_N"]
+    batches_to_run = ["Panel1"]
+    reference_batches = dict()
+    reference_batches["Panel1"] = ["Panel2", "Panel3"]
+    # reference_batches["Plate 19635 _CD8"] = ["Plate 27902_N", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
+    # reference_batches["Plate 27902_N"] = ["Plate 19635 _CD8", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
     folder_path = "FINAL"
 
+    load_data("Plate 19635 _CD8")
+    load_data("Plate 27902_N")
 
     if train_models:
         for directory in directories:
@@ -536,3 +573,71 @@ if __name__ == "__main__":
 
                 np.save(f'./{directory}_x.npy', x_transformed)
                 print(f"-------- FINISHED SHOWING RESULTS FOR {directory} -----------")
+
+
+    if compute_normalise:
+        for directory in directories:
+            if directory in batches_to_run:
+                print(f"-------- COMPUTING NORMALISED DATA FOR {directory} -----------")
+                x = load_data(directory, load_full=True)
+                num_cols = x.shape[1]
+
+                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 24)
+                model.load_state_dict(torch.load(f'FINAL/model_{directory}.pt', map_location=device))
+                model = model.to(device)
+
+                x_tensor = torch.tensor(x[:, 6:], dtype=torch.float32).to(device)
+
+
+                ref_batches_np = dict()
+                for ref_batch in reference_batches[directory]:
+                    ref_batches_np[ref_batch] = load_data(ref_batch, load_full=True)
+
+                reference_batches_data = dict()
+                for key, value in ref_batches_np.items():
+                    reference_batches_data[key] = torch.tensor(value[:, 6:], dtype=torch.float32).to(device)
+                
+                # print("Computing Normalised Data Using Identity")
+                # normalised_batches = bnormalizer_ae_identity(model, x_tensor, reference_batches_data)
+                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                # make_dir_results("Id", directory)
+                # for key, value in normalised_batches.items():
+                #     np.save(f'./results/Id/{directory}/{key}.npy', value)
+
+                # print("Computing Normalised Data Using Linear Shift")
+                # normalised_batches = bnormalizer_ae_linear(model, x_tensor, reference_batches_data)
+                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                # make_dir_results("LL", directory)
+                # for key, value in normalised_batches.items():
+                #     np.save(f'./results/LL/{directory}/{key}.npy', value)
+
+                # print("Computing Normalised Data Using SplineFn")
+                # normalised_batches = bnormalizer_ae_splinefn(model, x_tensor, reference_batches_data)
+                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                # make_dir_results("SplineFn", directory)
+                # for key, value in normalised_batches.items():
+                #     np.save(f'./results/SplineFn/{directory}/{key}.npy', value)
+
+                # print("Computing Normalised Data Using ClusAlign")
+                # normalised_batches = bnormalizer_ae_kmeans(model, x_tensor, reference_batches_data)
+                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                # make_dir_results("ClusAlign", directory)
+                # for key, value in normalised_batches.items():
+                #     np.save(f'./results/ClusAlign/{directory}/{key}.npy', value)
+
+                print("Computing Normalised Data Using EmpBayes")
+                normalised_batches = bnormalizer_ae_combat(model, x_tensor, reference_batches_data)
+                normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                make_dir_results("EmpBayes", directory)
+                for key, value in normalised_batches.items():
+                    np.save(f'./results/EmpBayes/{directory}/{key}.npy', value)
+
+                print("Computing Normalised Data Using MNN")
+                normalised_batches = bnormalizer_ae_mnn(model, x_tensor, reference_batches_data)
+                normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                make_dir_results("MNN", directory)
+                for key, value in normalised_batches.items():
+                    np.save(f'./results/MNN/{directory}/{key}.npy', value)
+
+
+                print(f"-------- FINISHED COMPUTING NORMALISED DATA FOR {directory} -----------")

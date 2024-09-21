@@ -1,6 +1,7 @@
-from BNormalizer_AE import BNorm_AE
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
+import torch.nn as nn
+import torch
 
 def find_mutual_nearest_neighbors(X, Y, k=20):
     nn_x = NearestNeighbors(n_neighbors=k, metric='euclidean')
@@ -21,10 +22,11 @@ def find_mutual_nearest_neighbors(X, Y, k=20):
     
     return np.array(mnn_pairs)
 
-def bnormalizer_ae_mnn(bnormalizer: BNorm_AE, ref_batch: np.ndarray, target_batches: dict, k: int = 20):
-    ref_batch_encoded = bnormalizer.encode(ref_batch)
-    target_batches_encoded = {key: bnormalizer.encode(target_batch) for key, target_batch in target_batches.items()}
-
+def bnormalizer_ae_mnn(bnormalizer: nn.Module, ref_batch: torch.Tensor, target_batches: dict, k: int = 20):
+    ref_batch_encoded = bnormalizer.encode(ref_batch).detach().cpu().numpy()
+    target_batches_encoded = {key: bnormalizer.encode(target_batch).detach().cpu().numpy() 
+                              for key, target_batch in target_batches.items()}
+    
     normalised_batches = {}
     for key, target_batch_encoded in target_batches_encoded.items():
         # Find Mutual Nearest Neighbors
@@ -39,6 +41,6 @@ def bnormalizer_ae_mnn(bnormalizer: BNorm_AE, ref_batch: np.ndarray, target_batc
         aligned_batch_encoded = target_batch_encoded + mean_shift
         
         # Decode the aligned batch
-        normalised_batches[key] = bnormalizer.decode(aligned_batch_encoded)
-
+        normalised_batches[key] = bnormalizer.decode(torch.from_numpy(aligned_batch_encoded).float()).detach().cpu().numpy()
+    
     return normalised_batches
