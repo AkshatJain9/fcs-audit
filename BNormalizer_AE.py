@@ -625,12 +625,12 @@ if __name__ == "__main__":
                 # for key, value in normalised_batches.items():
                 #     np.save(f'./results/ClusAlign/{directory}/{key}.npy', value)
 
-                print("Computing Normalised Data Using EmpBayes")
-                normalised_batches = bnormalizer_ae_combat(model, x_tensor, reference_batches_data)
-                normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                make_dir_results("EmpBayes", directory)
-                for key, value in normalised_batches.items():
-                    np.save(f'./results/EmpBayes/{directory}/{key}.npy', value)
+                # print("Computing Normalised Data Using EmpBayes")
+                # normalised_batches = bnormalizer_ae_combat(model, x_tensor, reference_batches_data)
+                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                # make_dir_results("EmpBayes", directory)
+                # for key, value in normalised_batches.items():
+                #     np.save(f'./results/EmpBayes/{directory}/{key}.npy', value)
 
                 print("Computing Normalised Data Using MNN")
                 normalised_batches = bnormalizer_ae_mnn(model, x_tensor, reference_batches_data)
