@@ -17,142 +17,83 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
 
     # Normalise target batches
     target_batches_norm = {}
+    gamma_hat_map = {}
+    sigma_sq_map = {}
     for key, target_batch_encoded in target_batches_encoded.items():
+        sigma_sq_map[key] = np.var(target_batch_encoded, axis=0)
         target_batch_normalised = (target_batch_encoded - ref_batch_mean) / np.sqrt(ref_batch_var)
         target_batches_norm[key] = target_batch_normalised
+        gamma_hat_map[key] = np.mean(target_batch_normalised, axis=0)
 
-    batch_gamma_hats = {}
+    ref_batch_encoded_norm = (ref_batch_encoded - ref_batch_mean) / np.sqrt(ref_batch_var)
     for key, target_batch_norm in target_batches_norm.items():
-        batch_gamma_hats[key] = np.mean(target_batch_norm, axis=0)
+        # Decode the normalised batch
+        plot_all_histograms(ref_batch_encoded_norm, target_batch_norm)
+    assert False
 
-    batch_gamma_hats_mean = {}
-    for key, target_batch_norm in target_batches_norm.items():
-        batch_gamma_hats_mean[key] = np.mean(batch_gamma_hats[key])
-    
-    num_elements_batch = {}
-    for key, target_batch_norm in target_batches_norm.items():
-        num_elements_batch[key] = target_batch_norm.shape[0]
 
-    tau_squared = {}
-    for key, target_batch_norm in target_batches_norm.items():
-        batch_gamma_hat = batch_gamma_hats[key]
-        batch_gamma_hat_mean = batch_gamma_hats_mean[key]
-        tau_squared[key] = np.sum((batch_gamma_hat - batch_gamma_hat_mean) ** 2) / (num_elements_batch[key] - 1)
-
-    # Step 5: Compute mean and variance of variances for each batch (method of moments)
-    mu_batch = {}  # mean of variances
-    sigma_squared_batch = {}  # variance of variances
-
-    for key, target_batch_norm in target_batches_norm.items():
-        # Compute gene-wise variances (s_ig^2) across samples in each batch
-        gene_wise_variances = np.var(target_batch_norm, axis=0)
-        
-        # Compute the mean (mu) of variances and variance (sigma^2) of those variances
-        mu_batch[key] = np.mean(gene_wise_variances)
-        sigma_squared_batch[key] = np.var(gene_wise_variances)
-
-    # Step 6: Compute theta and lambda for each batch using the method of moments
-    lambda_batch = {}
-    theta_batch = {}
-
-    for key in target_batches_norm.keys():
-        mu = mu_batch[key]
-        sigma_squared = sigma_squared_batch[key]
-
-        # Compute lambda using the formula: lambda = 2 + (mu^2 / sigma^2)
-        lambda_batch[key] = 2 + (mu ** 2 / sigma_squared)
-
-        # Compute theta using the formula: theta = mu * (lambda - 1)
-        theta_batch[key] = mu * (lambda_batch[key] - 1)
-
-    gamma_init = {}  # Initialize gamma values (additive batch effect)
-    delta_init = {}  # Initialize delta values (multiplicative batch effect)
-
-    for key, target_batch_norm in target_batches_norm.items():
-        # Compute the gene-wise means (gamma initialization)
-        gamma_init[key] = np.mean(target_batch_norm, axis=0)
-
-        # Compute the gene-wise variances (delta initialization)
-        # If you prefer simpler initialization, you can set this to 1.
-        delta_init[key] = np.ones_like(gamma_init[key]) # or just np.ones_like(gamma_init[key])
+    gamma_hat_values = np.array(list(gamma_hat_map.values()))
+    gamma_bar = np.mean(gamma_hat_values, axis=0)
+    t2 = np.var(gamma_hat_values, axis=0)
 
     # Step 4: Run the Empirical Bayes Algorithm iteratively
-
     gamma_final = {}
     delta_final = {}
-
-    num_g = len(ref_batch_mean)
-
-    for key in target_batches_norm.keys():
-        # Initialize additive and multiplicative effects
-        gamma_i = gamma_init[key]
-        delta_i = delta_init[key]
+    
+    for key, target_batch_norm in target_batches_norm.items():
+        gamma_hats = np.mean(target_batch_norm, axis=0)
+        delta_hats = np.var(target_batch_norm, axis=0)
+        sigma_squared = sigma_sq_map[key]
         
-        n_i = num_elements_batch[key]
-        tau_i_squared = tau_squared[key]
-        lambda_i = lambda_batch[key]
-        theta_i = theta_batch[key]
-        batch_gamma_hat = batch_gamma_hats[key]
-        batch_gamma_hat_mean = batch_gamma_hats_mean[key]
+        a_prior = (2 * np.mean(delta_hats) ** 2) / np.var(delta_hats)
+        b_prior = (2 * np.mean(delta_hats) ** 3) / np.var(delta_hats)
 
-        converged = False
-        iter_count = 0
 
-        while not converged and iter_count < 10000:
-            iter_count += 1
-            prev_gamma_i = gamma_i.copy()
-            prev_delta_i = delta_i.copy()
+        gamma_star = []
+        delta_star = []
+        for i in range(len(gamma_hats)):
+            gamma_hat_i = gamma_hats[i]
+            sigma_sq = sigma_squared[i]
+            gamma_bar_i = gamma_bar[i]
+            t2_i = t2[i]
 
-            # Update gamma (additive effect)
-            gamma_i = []
-            for g in range(num_g):
-                numerator = n_i * (tau_i_squared * batch_gamma_hat[g] + delta_i[g] * batch_gamma_hat_mean)
-                denominator = n_i * tau_i_squared + delta_i[g]
-                gamma_i.append(numerator / denominator)
+            numerator = (gamma_hat_i / sigma_sq) + (gamma_bar_i / t2_i)
+            denominator = (1 / sigma_sq) + (1 / t2_i)
+            gamma_star_i = numerator / denominator
+            gamma_star.append(gamma_star_i)
 
-            gamma_i = np.array(gamma_i)
+            delta_hat_i = delta_hats[i]
+            n_i = len(target_batch_norm)
+            delta_star_i = (delta_hat_i + b_prior) / (n_i + a_prior)
 
-            delta_i = []
-            for g in range(num_g):
-                numerator = theta_i + 0.5 * np.sum((target_batches_norm[key][:, g] - gamma_i[g]) ** 2)
-                denominator = (n_i / 2) + lambda_i - 1
-                delta_i.append(numerator / denominator)
+            delta_star.append(delta_star_i)
 
-            delta_i = np.array(delta_i)
+        gamma_star = np.array(gamma_star)
+        gamma_final[key] = gamma_star
 
-            # Check for convergence (tolerance check)
-            gamma_diff = np.max(np.abs(gamma_i - prev_gamma_i))
-            delta_diff = np.max(np.abs(delta_i - prev_delta_i))
-            
-            if gamma_diff < 1e-6 and delta_diff < 1e-6:
-                converged = True
-
-        gamma_final[key] = gamma_i
-        delta_final[key] = delta_i
+        delta_star = np.array(delta_star)
+        delta_final[key] = delta_star
 
     # Step 5: Adjust the data for batch effects
     adjusted_batches = {}
     for key, target_batch_norm in target_batches_norm.items():
         gamma_i = gamma_final[key]
-        delta_i = delta_final[key]
-        
+        delta_i = 1 + delta_final[key]
+
         # Adjust the data for batch effects
-        adjusted_batch = (target_batch_norm - gamma_i) / (np.sqrt(delta_i))
+        adjusted_batch = (target_batch_norm - gamma_i) / np.sqrt(delta_i)
         adjusted_batch = (adjusted_batch * np.sqrt(ref_batch_var)) + ref_batch_mean
         adjusted_batches[key] = adjusted_batch
 
-    for key, adjusted_batch in adjusted_batches.items():
-        # Decode the adjusted batch
-        plot_all_histograms(ref_batch_encoded, adjusted_batch)
-        assert False
+    # for key, adjusted_batch in adjusted_batches.items():
+    #     # Decode the adjusted batch
+    #     plot_all_histograms(ref_batch_encoded, adjusted_batch)
 
     normalised_batches = {}
     for key, adjusted_batch in adjusted_batches.items():
         # Decode the adjusted batch
         normalised_batches[key] = bnormalizer.decode(torch.from_numpy(adjusted_batch).float().to(device)).detach().cpu().numpy()
 
-
-    
     return normalised_batches
     
 
