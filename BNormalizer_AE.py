@@ -523,7 +523,7 @@ if __name__ == "__main__":
     # batches_to_run = ["Panel1", "Plate 19635 _CD8", "Plate 27902_N"]
     batches_to_run = ["Panel1"]
     reference_batches = dict()
-    reference_batches["Panel1"] = ["Panel2", "Panel3"]
+    reference_batches["Panel1"] = ["Panel2"]
     # reference_batches["Plate 19635 _CD8"] = ["Plate 27902_N", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
     # reference_batches["Plate 27902_N"] = ["Plate 19635 _CD8", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
     folder_path = "FINAL"

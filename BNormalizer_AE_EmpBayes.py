@@ -1,42 +1,87 @@
 import numpy as np
-from scipy import stats
 import torch.nn as nn
 import torch
 import matplotlib.pyplot as plt
 from sklearn.mixture import GaussianMixture
 
+def subsample_data(data, percentage):
+    """
+    Subsample the data by a given percentage.
+    """
+    sample_size = int(len(data) * percentage)
+    indices = np.random.choice(np.arange(len(data)), sample_size, replace=False)
+    return data[indices]
+
 def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, target_batches: dict):
+    n_components = 5
+
     device = next(bnormalizer.parameters()).device
     
     # Encode all batches
     ref_batch_encoded = bnormalizer.encode(ref_batch.to(device)).detach().cpu().numpy()
+    ref_batch_encoded_subsampled = subsample_data(ref_batch_encoded, 0.1)
     target_batches_encoded = {key: bnormalizer.encode(batch.to(device)).detach().cpu().numpy() 
                               for key, batch in target_batches.items()}
     
     ref_batch_gmms = []
     for i in range(ref_batch_encoded.shape[1]):
-        gmm = GaussianMixture(n_components=5)
-        gmm.fit(ref_batch_encoded[:, i].reshape(-1, 1))
+        gmm = GaussianMixture(n_components=n_components, covariance_type='diag')
+        gmm.fit(ref_batch_encoded_subsampled[:, i].reshape(-1, 1))
+        
+        # Sort the GMM components by means
+        sorted_indices = np.argsort(gmm.means_.flatten())
+        gmm.means_ = gmm.means_[sorted_indices]
+        gmm.covariances_ = gmm.covariances_[sorted_indices]
+        
         ref_batch_gmms.append(gmm)
     
-    
+    adjusted_target_batches = {}
     for key, target_batch_encoded in target_batches_encoded.items():
-        for i in range(target_batch_encoded.shape[1]):
-            # Fit the Gaussian Mixture Model
-            gmm = GaussianMixture(n_components=5)
-            gmm.fit(target_batch_encoded[:, i].reshape(-1, 1))
+        target_batch_shifted = target_batch_encoded
+        target_batch_encoded_subsampled = subsample_data(target_batch_encoded, 0.1)
+        for i in range(target_batch_encoded.shape[1]):  # For each feature
+            
+            # Fit a GMM to the current feature in the target batch
+            gmm = GaussianMixture(n_components=n_components, covariance_type='diag')
+            gmm.fit(target_batch_encoded_subsampled[:, i].reshape(-1, 1))
+            
+            # Sort the GMM components by means
+            sorted_indices = np.argsort(gmm.means_.flatten())
+            gmm.means_ = gmm.means_[sorted_indices]
+            gmm.covariances_ = gmm.covariances_[sorted_indices]
 
-            # Transform the target distribution to match the reference distribution, use shrinkage as is done in ComBat
-            
-            
+            # Apply transformation for each mixture component
+            for j in range(n_components):
+                ref_mean = ref_batch_gmms[i].means_[j][0]
+                ref_cov = ref_batch_gmms[i].covariances_[j][0]
+                
+                target_mean = gmm.means_[j][0]
+                target_cov = gmm.covariances_[j][0]
 
-            
-    for key, target_batch_encoded in target_batches_encoded.items():
+                # Compute shrinkage factor
+                shrinkage = ref_cov / (ref_cov + target_cov)
+
+                # Compute the vector shift
+                vector_shift = (ref_mean - target_mean) * shrinkage
+
+                # Apply the shift to each element of the target batch based on proximity to target_mean
+                target_distances = np.abs(target_batch_encoded[:, i] - target_mean)
+                closest_elements = target_distances < np.std(target_batch_encoded[:, i])  # Example of threshold for shifting
+
+                # Apply the shift only to the elements near the target mean
+                target_batch_shifted[closest_elements, i] += vector_shift
+        
+        # Store the shifted (adjusted) target batch
+        adjusted_target_batches[key] = target_batch_shifted
+
+    # Plot histograms for comparison (optional step for debugging or visualization)
+    for key, target_batch_encoded in adjusted_target_batches.items():
         plot_all_histograms(ref_batch_encoded, target_batch_encoded)
 
     normalised_batches = {}
-    for key, target_batch_encoded in target_batches_encoded.items():
+    for key, target_batch_encoded in adjusted_target_batches.items():
         normalised_batches[key] = bnormalizer.decode(torch.Tensor(target_batch_encoded).to(device)).detach().cpu().numpy()
+
     return normalised_batches
 
 
