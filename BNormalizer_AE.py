@@ -520,7 +520,7 @@ if __name__ == "__main__":
     train_models = False
     show_result = False
     compute_normalise = True
-    # batches_to_run = ["Panel1", "Plate 19635 _CD8", "Plate 27902_N"]
+    # batches_to_run = ["Plate 19635 _CD8", "Plate 27902_N"]
     batches_to_run = ["Panel1"]
     reference_batches = dict()
     reference_batches["Panel1"] = ["Panel2"]
