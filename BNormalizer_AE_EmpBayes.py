@@ -13,7 +13,7 @@ def subsample_data(data, percentage):
     return data[indices]
 
 def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, target_batches: dict):
-    n_components = 5
+    n_components = 3
 
     device = next(bnormalizer.parameters()).device
     
@@ -42,52 +42,29 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
         for i in range(target_batch_encoded.shape[1]):  # For each feature
             
             # Fit a GMM to the current feature in the target batch
-            gmm = GaussianMixture(n_components=n_components, covariance_type='diag')
-            gmm.fit(target_batch_encoded_subsampled[:, i].reshape(-1, 1))
+            gmm_target = GaussianMixture(n_components=n_components, covariance_type='diag')
+            gmm_target.fit(target_batch_encoded_subsampled[:, i].reshape(-1, 1))
             
             # Sort the GMM components by means
-            sorted_indices = np.argsort(gmm.means_.flatten())
-            gmm.means_ = gmm.means_[sorted_indices]
-            gmm.covariances_ = gmm.covariances_[sorted_indices]
+            sorted_indices = np.argsort(gmm_target.means_.flatten())
+            gmm_target.means_ = gmm_target.means_[sorted_indices]
+            gmm_target.covariances_ = gmm_target.covariances_[sorted_indices]
 
-            # Apply transformation for each mixture component
-            overall_vector_shift = np.zeros(target_batch_encoded.shape[0])
-            for j in range(n_components):
-                ref_mean = ref_batch_gmms[i].means_[j][0]
-                ref_cov = ref_batch_gmms[i].covariances_[j][0]
-                
-                target_mean = gmm.means_[j][0]
-                target_cov = gmm.covariances_[j][0]
-
-                if j == 0:
-                    prev_mean = ref_batch_gmms[i].means_[j][0]
-                else:
-                    prev_mean = gmm.means_[j-1][0]
-
-                if j == n_components - 1:
-                    next_mean = ref_batch_gmms[i].means_[j][0]
-                else:
-                    next_mean = gmm.means_[j+1][0]
-
-                # Compute shrinkage factor
-                shrinkage = ref_cov / (ref_cov + target_cov)
-
-                # Compute the vector shift
-                vector_shift = (ref_mean - target_mean) * shrinkage
-
-                # Apply the shift to each element of the target batch based on proximity to target_mean
-                target_distances = np.abs(target_batch_encoded[:, i] - target_mean)
-                target_distances_var = np.min([np.abs(target_mean - prev_mean), np.abs(next_mean - target_mean)])
-                if (target_distances_var < 1e-6):
-                    continue
-                scaling_factor = np.exp(-0.5 * (target_distances / (target_distances_var)) ** 2)
-                vector_shift = vector_shift * scaling_factor
-
-                # Apply the shift only to the elements near the target mean
-                overall_vector_shift += vector_shift
+            # TODO, map ith feature of target batch to ith feature of ref batch using GMM and responsibilites
+            # Store changes in target_batch_shifted
+            # Get the reference GMM for this feature
+            gmm_ref = ref_batch_gmms[i]
             
-            # Apply the overall shift to the target batch
-            target_batch_shifted[:, i] += overall_vector_shift
+            # Compute the shift for each Gaussian component pair
+            shifts = gmm_ref.means_.flatten() - gmm_target.means_.flatten()
+            
+            # Compute responsibilities for each data point in the target batch
+            responsibilities = gmm_target.predict_proba(target_batch_encoded[:, i].reshape(-1, 1))
+            
+            # Apply the shift weighted by the responsibilities
+            for k in range(n_components):  # For each Gaussian component
+                target_batch_shifted[:, i] += responsibilities[:, k] * shifts[k]
+
         
         # Store the shifted (adjusted) target batch
         adjusted_target_batches[key] = target_batch_shifted
