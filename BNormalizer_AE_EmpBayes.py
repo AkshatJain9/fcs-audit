@@ -28,10 +28,7 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
     
 
     ref_batch_encoded_subsampled = subsample_data(ref_batch_encoded, 0.01)
-    ref_batch_encoded_subsampled = smooth_gaussian(ref_batch_encoded_subsampled, sigma=0.3)
-    ref_batch_encoded_subsampled_smooth = smooth_gaussian(ref_batch_encoded_subsampled, sigma=0.3)
-    plot_all_histograms(ref_batch_encoded_subsampled, ref_batch_encoded_subsampled_smooth)
-    assert False
+
     ref_batch_gmms = []
     for i in range(ref_batch_encoded.shape[1]):
         best_gmm = None
@@ -39,12 +36,12 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
         best_n_components = None
         
         # Iterate over possible n_components and select the one with the lowest BIC
-        for n_components in range(2, 6):
-            gmm = GaussianMixture(n_components=n_components, n_init=5, covariance_type='diag', init_params='kmeans')
+        for n_components in range(1, 6):
+            gmm = GaussianMixture(n_components=n_components, n_init=5, init_params='kmeans', max_iter=1000)
             gmm.fit(ref_batch_encoded_subsampled[:, i].reshape(-1, 1))
             bic = gmm.bic(ref_batch_encoded_subsampled[:, i].reshape(-1, 1))
             
-            if bic < best_bic:  # If the BIC is at least 10 lower than the previous best
+            if bic < best_bic:
                 best_bic = bic
                 best_gmm = gmm
                 best_n_components = n_components
@@ -53,6 +50,7 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
         sorted_indices = np.argsort(best_gmm.means_.flatten())
         best_gmm.means_ = best_gmm.means_[sorted_indices]
         best_gmm.covariances_ = best_gmm.covariances_[sorted_indices]
+        best_gmm.weights_ = best_gmm.weights_[sorted_indices]
         
         ref_batch_gmms.append(best_gmm)
         
@@ -124,6 +122,31 @@ def apply_median_filter(data, size=3):
     for col in range(smoothed_data.shape[1]):
         # Apply median filter along each column
         smoothed_data[:, col] = median_filter(smoothed_data[:, col], size=size)
+    return smoothed_data
+
+def smooth_data(data, bins=200):
+    # Convert input to numpy array if it's not already
+    data = np.array(data)
+    
+    # Create a copy of the input data
+    smoothed_data = np.copy(data)
+    
+    # Iterate through each column
+    for col in range(data.shape[1]):
+        column = data[:, col]
+        
+        # Create histogram
+        hist, bin_edges = np.histogram(column, bins=bins)
+        
+        # Calculate bin centers
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        
+        # Find the bin index for each value in the column
+        bin_indices = np.digitize(column, bin_edges[1:-1])
+        
+        # Replace each value with its corresponding bin center
+        smoothed_data[:, col] = bin_centers[bin_indices]
+    
     return smoothed_data
 
 def visualize_gmms_on_ref(ref_batch_encoded_subsampled, ref_batch_gmms):
