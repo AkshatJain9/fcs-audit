@@ -26,17 +26,38 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
     target_batches_encoded = {key: bnormalizer.encode(batch.to(device)).detach().cpu().numpy() 
                               for key, batch in target_batches.items()}
     
+
     ref_batch_encoded_subsampled = subsample_data(ref_batch_encoded, 0.01)
+    ref_batch_encoded_subsampled = smooth_gaussian(ref_batch_encoded_subsampled, sigma=0.3)
+    ref_batch_encoded_subsampled_smooth = smooth_gaussian(ref_batch_encoded_subsampled, sigma=0.3)
+    plot_all_histograms(ref_batch_encoded_subsampled, ref_batch_encoded_subsampled_smooth)
+    assert False
     ref_batch_gmms = []
     for i in range(ref_batch_encoded.shape[1]):
-        gmm = GaussianMixture(n_components=n_components, covariance_type='diag')
-        gmm.fit(ref_batch_encoded_subsampled[:, i].reshape(-1, 1))
+        best_gmm = None
+        best_bic = np.inf
+        best_n_components = None
         
-        # Sort the GMM components by means
-        sorted_indices = np.argsort(gmm.means_.flatten())
-        gmm.means_ = gmm.means_[sorted_indices]
-        gmm.covariances_ = gmm.covariances_[sorted_indices]
+        # Iterate over possible n_components and select the one with the lowest BIC
+        for n_components in range(2, 6):
+            gmm = GaussianMixture(n_components=n_components, n_init=5, covariance_type='diag', init_params='kmeans')
+            gmm.fit(ref_batch_encoded_subsampled[:, i].reshape(-1, 1))
+            bic = gmm.bic(ref_batch_encoded_subsampled[:, i].reshape(-1, 1))
+            
+            if bic < best_bic:  # If the BIC is at least 10 lower than the previous best
+                best_bic = bic
+                best_gmm = gmm
+                best_n_components = n_components
         
+        # Sort the best GMM components by means
+        sorted_indices = np.argsort(best_gmm.means_.flatten())
+        best_gmm.means_ = best_gmm.means_[sorted_indices]
+        best_gmm.covariances_ = best_gmm.covariances_[sorted_indices]
+        
+        ref_batch_gmms.append(best_gmm)
+        
+        print(f"Channel {i}: Optimal number of GMM components: {best_n_components}")
+    
     # Visualize the GMMs fitted on the reference batch
     visualize_gmms_on_ref(ref_batch_encoded_subsampled, ref_batch_gmms)
     assert False
@@ -120,7 +141,7 @@ def visualize_gmms_on_ref(ref_batch_encoded_subsampled, ref_batch_gmms):
     
     for i, ax in enumerate(axs):
         # Plot histogram of data for this feature
-        ax.hist(ref_batch_encoded_subsampled[:, i], bins=100, density=True, alpha=0.6, label='Data')
+        ax.hist(ref_batch_encoded_subsampled[:, i], bins=200, density=True, alpha=0.6, label='Data')
         
         # Plot the GMM components
         gmm = ref_batch_gmms[i]
