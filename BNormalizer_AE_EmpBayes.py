@@ -3,6 +3,10 @@ import torch.nn as nn
 import torch
 import matplotlib.pyplot as plt
 from sklearn.mixture import GaussianMixture
+from scipy.spatial.distance import cdist
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal import savgol_filter
+from scipy.ndimage import median_filter
 
 def subsample_data(data, percentage):
     """
@@ -19,10 +23,10 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
     
     # Encode all batches
     ref_batch_encoded = bnormalizer.encode(ref_batch.to(device)).detach().cpu().numpy()
-    ref_batch_encoded_subsampled = subsample_data(ref_batch_encoded, 0.001)
     target_batches_encoded = {key: bnormalizer.encode(batch.to(device)).detach().cpu().numpy() 
                               for key, batch in target_batches.items()}
     
+    ref_batch_encoded_subsampled = subsample_data(ref_batch_encoded, 0.01)
     ref_batch_gmms = []
     for i in range(ref_batch_encoded.shape[1]):
         gmm = GaussianMixture(n_components=n_components, covariance_type='diag')
@@ -33,7 +37,9 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
         gmm.means_ = gmm.means_[sorted_indices]
         gmm.covariances_ = gmm.covariances_[sorted_indices]
         
-        ref_batch_gmms.append(gmm)
+    # Visualize the GMMs fitted on the reference batch
+    visualize_gmms_on_ref(ref_batch_encoded_subsampled, ref_batch_gmms)
+    assert False
     
     adjusted_target_batches = {}
     for key, target_batch_encoded in target_batches_encoded.items():
@@ -79,8 +85,59 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
 
     return normalised_batches
 
-
 #################################
+def smooth_gaussian(data, sigma=2):
+    smoothed_data = np.copy(data)
+    for col in range(smoothed_data.shape[1]):
+        smoothed_data[:, col] = gaussian_filter1d(smoothed_data[:, col], sigma=sigma)
+    return smoothed_data
+
+def smooth_savitzky_golay(data, window_length=5, polyorder=2):
+    smoothed_data = np.copy(data)
+    for col in range(smoothed_data.shape[1]):
+        smoothed_data[:, col] = savgol_filter(smoothed_data[:, col], window_length=window_length, polyorder=polyorder)
+    return smoothed_data
+
+def apply_median_filter(data, size=3):
+    smoothed_data = np.copy(data)
+    for col in range(smoothed_data.shape[1]):
+        # Apply median filter along each column
+        smoothed_data[:, col] = median_filter(smoothed_data[:, col], size=size)
+    return smoothed_data
+
+def visualize_gmms_on_ref(ref_batch_encoded_subsampled, ref_batch_gmms):
+    """
+    Visualizes the GMMs fitted on the reference batch for each feature (column).
+    """
+    num_features = ref_batch_encoded_subsampled.shape[1]
+    x = np.linspace(np.min(ref_batch_encoded_subsampled), np.max(ref_batch_encoded_subsampled), 1000)
+
+    fig, axs = plt.subplots(num_features, 1, figsize=(8, 2*num_features))
+    
+    # If there's only one subplot, axs won't be an array, so wrap it in one
+    if num_features == 1:
+        axs = [axs]
+    
+    for i, ax in enumerate(axs):
+        # Plot histogram of data for this feature
+        ax.hist(ref_batch_encoded_subsampled[:, i], bins=100, density=True, alpha=0.6, label='Data')
+        
+        # Plot the GMM components
+        gmm = ref_batch_gmms[i]
+        for j in range(gmm.means_.shape[0]):
+            mean = gmm.means_[j, 0]
+            cov = gmm.covariances_[j, 0]
+            weight = gmm.weights_[j]
+            # Plot the Gaussian component
+            y = weight * (1.0 / np.sqrt(2 * np.pi * cov)) * np.exp(-(x - mean) ** 2 / (2 * cov))
+            ax.plot(x, y, label=f'Component {j+1}')
+        
+        ax.legend()
+    
+    plt.tight_layout()
+    plt.show()
+
+
 def generate_histogram(panel_np, index, min_val, max_val):
     range = (min_val, max_val)
 
