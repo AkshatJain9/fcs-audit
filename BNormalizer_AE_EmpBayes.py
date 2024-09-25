@@ -16,6 +16,32 @@ def subsample_data(data, percentage):
     indices = np.random.choice(np.arange(len(data)), sample_size, replace=False)
     return np.copy(data[indices])
 
+def get_optimal_gmm(data):
+    """
+    Fit a Gaussian Mixture Model to the data for each number of components in the range.
+    Return the model with the lowest BIC.
+    """
+    best_gmm = None
+    best_bic = np.inf
+    best_n_components = None
+    
+    for n_components in range(1, 6):
+        gmm = GaussianMixture(n_components=n_components, init_params='kmeans')
+        gmm.fit(data)
+        bic = gmm.bic(data)
+        
+        if bic < best_bic:
+            best_bic = bic
+            best_gmm = gmm
+            best_n_components = n_components
+    
+    # Sort the best GMM components by means
+    sorted_indices = np.argsort(best_gmm.means_.flatten())
+    best_gmm.means_ = best_gmm.means_[sorted_indices]
+    best_gmm.covariances_ = best_gmm.covariances_[sorted_indices]
+    best_gmm.weights_ = best_gmm.weights_[sorted_indices]
+    return best_gmm
+
 def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, target_batches: dict):
     n_components = 5
 
@@ -31,34 +57,12 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
 
     ref_batch_gmms = []
     for i in range(ref_batch_encoded.shape[1]):
-        best_gmm = None
-        best_bic = np.inf
-        best_n_components = None
-        
-        # Iterate over possible n_components and select the one with the lowest BIC
-        for n_components in range(1, 6):
-            gmm = GaussianMixture(n_components=n_components, n_init=5, init_params='kmeans', max_iter=1000)
-            gmm.fit(ref_batch_encoded_subsampled[:, i].reshape(-1, 1))
-            bic = gmm.bic(ref_batch_encoded_subsampled[:, i].reshape(-1, 1))
-            
-            if bic < best_bic:
-                best_bic = bic
-                best_gmm = gmm
-                best_n_components = n_components
-        
-        # Sort the best GMM components by means
-        sorted_indices = np.argsort(best_gmm.means_.flatten())
-        best_gmm.means_ = best_gmm.means_[sorted_indices]
-        best_gmm.covariances_ = best_gmm.covariances_[sorted_indices]
-        best_gmm.weights_ = best_gmm.weights_[sorted_indices]
-        
+        best_gmm = get_optimal_gmm(ref_batch_encoded_subsampled[:, i].reshape(-1, 1))
         ref_batch_gmms.append(best_gmm)
-        
-        print(f"Channel {i}: Optimal number of GMM components: {best_n_components}")
-    
+            
     # Visualize the GMMs fitted on the reference batch
-    visualize_gmms_on_ref(ref_batch_encoded_subsampled, ref_batch_gmms)
-    assert False
+    # visualize_gmms_on_ref(ref_batch_encoded_subsampled, ref_batch_gmms)
+    # assert False
     
     adjusted_target_batches = {}
     for key, target_batch_encoded in target_batches_encoded.items():
@@ -67,17 +71,17 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
         for i in range(target_batch_encoded.shape[1]):  # For each feature
             
             # Fit a GMM to the current feature in the target batch
-            gmm_target = GaussianMixture(n_components=n_components, covariance_type='diag')
-            gmm_target.fit(target_batch_encoded_subsampled[:, i].reshape(-1, 1))
-            
-            # Sort the GMM components by means
-            sorted_indices = np.argsort(gmm_target.means_.flatten())
-            gmm_target.means_ = gmm_target.means_[sorted_indices]
-            gmm_target.covariances_ = gmm_target.covariances_[sorted_indices]
+            gmm_target = get_optimal_gmm(target_batch_encoded_subsampled[:, i].reshape(-1, 1))
 
             # Store changes in target_batch_shifted
             # Get the reference GMM for this feature
             gmm_ref = ref_batch_gmms[i]
+
+            # Assert they are the same size
+            if (gmm_ref.means_.shape[0] != gmm_target.means_.shape[0]):
+                print(i)
+                print("Different number of components in GMMs. Ref: ", gmm_ref.means_.shape[0], " Target: ", gmm_target.means_.shape[0])
+                continue
             
             # Compute the shift for each Gaussian component pair
             shifts = gmm_ref.means_.flatten() - gmm_target.means_.flatten()
@@ -97,7 +101,7 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
     # Plot histograms for comparison (optional step for debugging or visualization)
     for key, target_batch_encoded in adjusted_target_batches.items():
         plot_all_histograms(ref_batch_encoded, target_batch_encoded)
-
+    assert False
     normalised_batches = {}
     for key, target_batch_encoded in adjusted_target_batches.items():
         normalised_batches[key] = bnormalizer.decode(torch.Tensor(target_batch_encoded).to(device)).detach().cpu().numpy()
