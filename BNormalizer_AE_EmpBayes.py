@@ -9,19 +9,33 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import savgol_filter
 from scipy.ndimage import median_filter
 
+
+sample_ratio = 1
+
 def subsample_data(data, percentage):
     """
     Subsample the data by a given percentage.
     """
+    if percentage >= 1:
+        return np.copy(data)
     sample_size = int(len(data) * percentage)
     indices = np.random.choice(np.arange(len(data)), sample_size, replace=False)
     return np.copy(data[indices])
 
-def get_optimal_gmm(data):
+def get_optimal_gmm(data, n_components=None, means_init=None):
     """
     Fit a Gaussian Mixture Model to the data for each number of components in the range.
     Return the model with the lowest BIC.
     """
+    if (n_components is not None):
+        gmm = GaussianMixture(n_components=n_components, init_params='kmeans', means_init=means_init)
+        gmm.fit(data)
+        sorted_indices = np.argsort(gmm.means_.flatten())
+        gmm.means_ = gmm.means_[sorted_indices]
+        gmm.covariances_ = gmm.covariances_[sorted_indices]
+        gmm.weights_ = gmm.weights_[sorted_indices]
+        return gmm
+
     best_gmm = None
     best_bic = np.inf
     best_n_components = None
@@ -75,8 +89,6 @@ def generate_shifts(ref_gmm, target_gmm):
     
 
 def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, target_batches: dict):
-    n_components = 5
-
     device = next(bnormalizer.parameters()).device
     
     # Encode all batches
@@ -85,7 +97,7 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
                               for key, batch in target_batches.items()}
     
 
-    ref_batch_encoded_subsampled = subsample_data(ref_batch_encoded, 0.01)
+    ref_batch_encoded_subsampled = subsample_data(ref_batch_encoded, sample_ratio)
 
     ref_batch_gmms = []
     for i in range(ref_batch_encoded.shape[1]):
@@ -98,26 +110,25 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
     
     adjusted_target_batches = {}
     for key, target_batch_encoded in target_batches_encoded.items():
-        target_batch_shifted = target_batch_encoded
-        target_batch_encoded_subsampled = subsample_data(target_batch_encoded, 0.01)
+        target_batch_shifted = np.copy(target_batch_encoded)
+        # Do a simple linear shift before storing the adjusted target batch
+        target_batch_shifted = ((target_batch_shifted - np.mean(target_batch_shifted, axis=0)) / np.std(target_batch_shifted, axis=0)) * np.std(ref_batch_encoded, axis=0) + np.mean(ref_batch_encoded, axis=0)
+        target_batch_encoded_subsampled = subsample_data(target_batch_shifted, sample_ratio)
+        target_batch_gmms = []
         for i in range(target_batch_encoded.shape[1]):  # For each feature
-            # Fit a GMM to the current feature in the target batch
-            gmm_target = get_optimal_gmm(target_batch_encoded_subsampled[:, i].reshape(-1, 1))
-
             # Store changes in target_batch_shifted
             # Get the reference GMM for this feature
             gmm_ref = ref_batch_gmms[i]
+            
+            # Fit a GMM to the current feature in the target batch
+            gmm_target = get_optimal_gmm(target_batch_encoded_subsampled[:, i].reshape(-1, 1), n_components=gmm_ref.means_.shape[0])
+            target_batch_gmms.append(gmm_target)
 
+        
             # Compute the shrinkage factor for each Gaussian component
             gmm_ref_cov = gmm_ref.covariances_.flatten()
             gmm_target_cov = gmm_target.covariances_.flatten()
 
-            # # Assert they are the same size
-            # if (gmm_ref.means_.shape[0] != gmm_target.means_.shape[0]):
-            #     print(i)
-            #     print("Different number of components in GMMs. Ref: ", gmm_ref.means_.shape[0], " Target: ", gmm_target.means_.shape[0])
-            #     continue
-            
             # # Compute the shift for each Gaussian component pair
             # shifts = gmm_ref.means_.flatten() - gmm_target.means_.flatten()
             shifts, target_idcs, ref_idcs = generate_shifts(gmm_ref, gmm_target)
@@ -130,13 +141,13 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
                 # Compute shrinkage as the ratio of the target component's covariance to the reference component's covariance
                 target_batch_shifted[:, i] += np.sqrt((gmm_ref_cov[ref_idcs[k]] / (gmm_ref_cov[ref_idcs[k]] + gmm_target_cov[target_idcs[k]]))) * responsibilities[:, target_idcs[k]] * shifts[k]
 
-        
+        # visualize_gmms_on_ref(target_batch_encoded, target_batch_gmms)
         # Store the shifted (adjusted) target batch
         adjusted_target_batches[key] = target_batch_shifted
 
     # Plot histograms for comparison (optional step for debugging or visualization)
-    for key, target_batch_encoded in adjusted_target_batches.items():
-        plot_all_histograms(ref_batch_encoded, target_batch_encoded)
+    # for key, target_batch_encoded in adjusted_target_batches.items():
+    #     plot_all_histograms(ref_batch_encoded, target_batch_encoded)
 
     normalised_batches = {}
     for key, target_batch_encoded in adjusted_target_batches.items():
@@ -164,30 +175,6 @@ def apply_median_filter(data, size=3):
         smoothed_data[:, col] = median_filter(smoothed_data[:, col], size=size)
     return smoothed_data
 
-def smooth_data(data, bins=200):
-    # Convert input to numpy array if it's not already
-    data = np.array(data)
-    
-    # Create a copy of the input data
-    smoothed_data = np.copy(data)
-    
-    # Iterate through each column
-    for col in range(data.shape[1]):
-        column = data[:, col]
-        
-        # Create histogram
-        hist, bin_edges = np.histogram(column, bins=bins)
-        
-        # Calculate bin centers
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        
-        # Find the bin index for each value in the column
-        bin_indices = np.digitize(column, bin_edges[1:-1])
-        
-        # Replace each value with its corresponding bin center
-        smoothed_data[:, col] = bin_centers[bin_indices]
-    
-    return smoothed_data
 
 def visualize_gmms_on_ref(ref_batch_encoded_subsampled, ref_batch_gmms):
     """
