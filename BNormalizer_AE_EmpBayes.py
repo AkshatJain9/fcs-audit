@@ -10,10 +10,10 @@ def subsample_data(data, percentage):
     """
     sample_size = int(len(data) * percentage)
     indices = np.random.choice(np.arange(len(data)), sample_size, replace=False)
-    return data[indices]
+    return np.copy(data[indices])
 
 def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, target_batches: dict):
-    n_components = 3
+    n_components = 5
 
     device = next(bnormalizer.parameters()).device
     
@@ -50,7 +50,6 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
             gmm_target.means_ = gmm_target.means_[sorted_indices]
             gmm_target.covariances_ = gmm_target.covariances_[sorted_indices]
 
-            # TODO, map ith feature of target batch to ith feature of ref batch using GMM and responsibilites
             # Store changes in target_batch_shifted
             # Get the reference GMM for this feature
             gmm_ref = ref_batch_gmms[i]
@@ -63,6 +62,7 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
             
             # Apply the shift weighted by the responsibilities
             for k in range(n_components):  # For each Gaussian component
+                # Compute shrinkage as the ratio of the target component's covariance to the reference component's covariance
                 target_batch_shifted[:, i] += responsibilities[:, k] * shifts[k]
 
         
