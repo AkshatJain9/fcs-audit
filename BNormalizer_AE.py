@@ -560,7 +560,7 @@ if __name__ == "__main__":
 
                 # model = BNorm_AE(x.shape[1], 3)
                 model = BNorm_AE_Overcomplete(x.shape[1] - 6, 24)
-                model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device))
+                model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device, weights_only=False))
                 model = model.to(device)
 
                 x_tensor = torch.tensor(x[:, 6:], dtype=torch.float32).to(device)
