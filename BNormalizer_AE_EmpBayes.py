@@ -48,7 +48,7 @@ def generate_shifts(ref_gmm, target_gmm):
     target_means = target_gmm.means_.flatten()
     
     if ref_means.shape[0] == target_means.shape[0]:
-        return (ref_means - target_means), np.arange(ref_means.shape[0])
+        return (ref_means - target_means), np.arange(ref_means.shape[0]), np.arange(target_means.shape[0])
     else:
         # Use Hungarian algorithm to find the best matching
         cost_matrix = cdist(ref_means.reshape(-1, 1), target_means.reshape(-1, 1))
@@ -60,16 +60,18 @@ def generate_shifts(ref_gmm, target_gmm):
         # Initialize shifts array with the minimum size
         shifts = np.zeros(min_gaussians)
         target_indices = np.zeros(min_gaussians, dtype=int)
+        ref_indices = np.zeros(min_gaussians, dtype=int)
         
         # Calculate shifts for matched Gaussians, up to the minimum number
         for i, (ref_idx, target_idx) in enumerate(zip(row_ind, col_ind)):
             if i < min_gaussians:
                 shifts[i] = ref_means[ref_idx] - target_means[target_idx]
                 target_indices[i] = target_idx
+                ref_indices[i] = ref_idx
             else:
                 break
         
-        return shifts, target_indices
+        return shifts, target_indices, ref_indices
     
 
 def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, target_batches: dict):
@@ -99,13 +101,16 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
         target_batch_shifted = target_batch_encoded
         target_batch_encoded_subsampled = subsample_data(target_batch_encoded, 0.01)
         for i in range(target_batch_encoded.shape[1]):  # For each feature
-            
             # Fit a GMM to the current feature in the target batch
             gmm_target = get_optimal_gmm(target_batch_encoded_subsampled[:, i].reshape(-1, 1))
 
             # Store changes in target_batch_shifted
             # Get the reference GMM for this feature
             gmm_ref = ref_batch_gmms[i]
+
+            # Compute the shrinkage factor for each Gaussian component
+            gmm_ref_cov = gmm_ref.covariances_.flatten()
+            gmm_target_cov = gmm_target.covariances_.flatten()
 
             # # Assert they are the same size
             # if (gmm_ref.means_.shape[0] != gmm_target.means_.shape[0]):
@@ -115,7 +120,7 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
             
             # # Compute the shift for each Gaussian component pair
             # shifts = gmm_ref.means_.flatten() - gmm_target.means_.flatten()
-            shifts, target_idcs = generate_shifts(gmm_ref, gmm_target)
+            shifts, target_idcs, ref_idcs = generate_shifts(gmm_ref, gmm_target)
             
             # Compute responsibilities for each data point in the target batch
             responsibilities = gmm_target.predict_proba(target_batch_encoded[:, i].reshape(-1, 1))
@@ -123,7 +128,7 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
             # Apply the shift weighted by the responsibilities
             for k in range(shifts.shape[0]):  # For each Gaussian component
                 # Compute shrinkage as the ratio of the target component's covariance to the reference component's covariance
-                target_batch_shifted[:, i] += responsibilities[:, target_idcs[k]] * shifts[k]
+                target_batch_shifted[:, i] += np.sqrt((gmm_ref_cov[ref_idcs[k]] / (gmm_ref_cov[ref_idcs[k]] + gmm_target_cov[target_idcs[k]]))) * responsibilities[:, target_idcs[k]] * shifts[k]
 
         
         # Store the shifted (adjusted) target batch
