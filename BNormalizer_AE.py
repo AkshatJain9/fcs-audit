@@ -509,10 +509,16 @@ def recombine_data(data_orig: dict, data_normalised: dict):
     return res
 
 def make_dir_results(method, directory):
-    try:
-        os.mkdir(f'./results/{method}/{directory}')
-    except:
-        pass
+    if platform.system() == "Windows":
+        try:
+            os.makedirs(f'.\\results\\{method}\\{directory}')
+        except:
+            pass
+    else:
+        try:
+            os.makedirs(f'./results/{method}/{directory}')
+        except:
+            pass
 
 
 ##################### MAIN #####################
@@ -615,19 +621,20 @@ if __name__ == "__main__":
                 # for key, value in normalised_batches.items():
                 #     np.save(f'./results/SplineFn/{directory}/{key}.npy', value)
 
-                # print("Computing Normalised Data Using ClusAlign")
-                # normalised_batches = bnormalizer_ae_kmeans(model, x_tensor, reference_batches_data)
-                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                # make_dir_results("ClusAlign", directory)
-                # for key, value in normalised_batches.items():
-                #     np.save(f'./results/ClusAlign/{directory}/{key}.npy', value)
-
-                print("Computing Normalised Data Using EmpBayes")
-                normalised_batches = bnormalizer_ae_combat(model, x_tensor, reference_batches_data)
+                print("Computing Normalised Data Using ClusAlign")
+                normalised_batches = bnormalizer_ae_kmeans(model, x_tensor, reference_batches_data)
                 normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                make_dir_results("EmpBayes", directory)
+                make_dir_results("ClusAlign", directory)
                 for key, value in normalised_batches.items():
-                    np.save(f'./results/EmpBayes/{directory}/{key}.npy', value)
+                    np.save(f'./results/ClusAlign/{directory}/{key}.npy', value)
+                        
+
+                # print("Computing Normalised Data Using EmpBayes")
+                # normalised_batches = bnormalizer_ae_combat(model, x_tensor, reference_batches_data)
+                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                # make_dir_results("EmpBayes", directory)
+                # for key, value in normalised_batches.items():
+                #     np.save(f'./results/EmpBayes/{directory}/{key}.npy', value)
 
                 # print("Computing Normalised Data Using MNN")
                 # normalised_batches = bnormalizer_ae_mnn(model, x_tensor, reference_batches_data)

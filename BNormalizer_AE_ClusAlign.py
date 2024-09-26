@@ -3,8 +3,9 @@ from sklearn.cluster import KMeans
 from scipy.optimize import linear_sum_assignment
 import torch.nn as nn
 import torch
+from scipy.spatial.distance import cdist
 
-def bnormalizer_ae_kmeans(bnormalizer: nn.Module, ref_batch: torch.Tensor, target_batches: dict, n_clusters: int = 5):
+def bnormalizer_ae_kmeans(bnormalizer: nn.Module, ref_batch: torch.Tensor, target_batches: dict, n_clusters: int = 42):
     device = next(bnormalizer.parameters()).device
     
     ref_batch_encoded = bnormalizer.encode(ref_batch.to(device)).detach().cpu().numpy()
@@ -24,7 +25,7 @@ def bnormalizer_ae_kmeans(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
         target_centroids = target_kmeans.cluster_centers_
 
         # Calculate distances between centroids
-        distances = np.linalg.norm(ref_centroids[:, np.newaxis] - target_centroids, axis=2)
+        distances = cdist(ref_centroids, target_centroids)
 
         # Use Hungarian algorithm to find optimal matching
         ref_indices, target_indices = linear_sum_assignment(distances)
