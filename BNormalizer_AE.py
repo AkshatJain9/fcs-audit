@@ -9,7 +9,6 @@ import os
 import platform
 from geomloss import SamplesLoss
 from sklearn.mixture import GaussianMixture
-import torch.nn.functional as F
 from itertools import combinations
 
 from BNormalizer_AE_Id import bnormalizer_ae_identity
@@ -17,7 +16,6 @@ from BNormalizer_AE_LL import bnormalizer_ae_linear
 from BNormalizer_AE_SplineFn import bnormalizer_ae_splinefn
 from BNormalizer_AE_ClusAlign import bnormalizer_ae_kmeans
 from BNormalizer_AE_EmpBayes import bnormalizer_ae_combat
-from BNormalizer_AE_MNN import bnormalizer_ae_mnn
 
 scatter_channels = ['FSC-A', 'FSC-H', 'FSC-W', 'SSC-A', 'SSC-H', 'SSC-W']
 fluro_channels = ['BUV 395-A', 'BUV737-A', 'Pacific Blue-A', 'FITC-A', 'PerCP-Cy5-5-A', 'PE-A', 'PE-Cy7-A', 'APC-A', 'Alexa Fluor 700-A', 'APC-Cy7-A','BV510-A','BV605-A']
@@ -621,27 +619,19 @@ if __name__ == "__main__":
                 # for key, value in normalised_batches.items():
                 #     np.save(f'./results/SplineFn/{directory}/{key}.npy', value)
 
-                print("Computing Normalised Data Using ClusAlign")
-                normalised_batches = bnormalizer_ae_kmeans(model, x_tensor, reference_batches_data)
-                normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                make_dir_results("ClusAlign", directory)
-                for key, value in normalised_batches.items():
-                    np.save(f'./results/ClusAlign/{directory}/{key}.npy', value)
+                # print("Computing Normalised Data Using ClusAlign")
+                # normalised_batches = bnormalizer_ae_kmeans(model, x_tensor, reference_batches_data)
+                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                # make_dir_results("ClusAlign", directory)
+                # for key, value in normalised_batches.items():
+                #     np.save(f'./results/ClusAlign/{directory}/{key}.npy', value)
                         
-
                 # print("Computing Normalised Data Using EmpBayes")
                 # normalised_batches = bnormalizer_ae_combat(model, x_tensor, reference_batches_data)
                 # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
                 # make_dir_results("EmpBayes", directory)
                 # for key, value in normalised_batches.items():
                 #     np.save(f'./results/EmpBayes/{directory}/{key}.npy', value)
-
-                # print("Computing Normalised Data Using MNN")
-                # normalised_batches = bnormalizer_ae_mnn(model, x_tensor, reference_batches_data)
-                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                # make_dir_results("MNN", directory)
-                # for key, value in normalised_batches.items():
-                #     np.save(f'./results/MNN/{directory}/{key}.npy', value)
 
 
                 print(f"-------- FINISHED COMPUTING NORMALISED DATA FOR {directory} -----------")
