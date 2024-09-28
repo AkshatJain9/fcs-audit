@@ -10,7 +10,7 @@ from scipy.signal import savgol_filter
 from scipy.ndimage import median_filter
 
 
-sample_ratio = 1
+sample_ratio = 0.1
 
 def subsample_data(data, percentage):
     """
