@@ -78,17 +78,17 @@ def graph_all_mixed_losses(name):
         if (len(loss_arr) > 3):
             cluster_align_loss = loss_arr[3] / 0.1
             total_loss += cluster_align_loss
-            plt.plot(cluster_align_loss, label=f'{label} - Topological Loss')
+            plt.plot(cluster_align_loss, label=f'Topological Loss')
 
         # Use the parent directory name as the label
         
-        plt.plot(total_loss, label=f'{label} - Total Loss, p={p_value}')
-        plt.plot(mse_loss, label=f'{label} - MSE Loss, p={p_value}')
-        plt.plot(tvd_loss, label=f'{label} - Histogram Loss, p={p_value}')
+        plt.plot(total_loss, label=f'Total Loss')
+        plt.plot(mse_loss, label=f'MSE Loss')
+        plt.plot(tvd_loss, label=f'Histogram Loss')
 
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
-    plt.title(f'Loss per unit over epochs for files containing "{name}"')
+    plt.title(f'Loss per unit over epochs for "{name}", k=6')
     plt.legend()  # Add a legend to differentiate the curves
     plt.ylim(0, 0.0001)  # Set y-axis limits (adjust the values as needed)
     plt.tight_layout()  # Adjust the layout to prevent cutting off labels
