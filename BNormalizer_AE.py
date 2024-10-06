@@ -531,15 +531,17 @@ def plot_histograms(panel_np_1):
 ##################### MAIN #####################
 if __name__ == "__main__":
     train_models = False
-    show_result = True
-    compute_normalise = False
-    # batches_to_run = ["Plate 19635 _CD8", "Plate 27902_N"]
-    batches_to_run = ["Panel1"]
+    show_result = False
+    compute_normalise = True
+    batches_to_run = ["Plate 27902_N"]
+    # batches_to_run = ["Panel1"]
     reference_batches = dict()
-    reference_batches["Panel1"] = ["Panel2","Panel3"]
-    # reference_batches["Plate 19635 _CD8"] = ["Plate 27902_N", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
-    # reference_batches["Plate 27902_N"] = ["Plate 19635 _CD8", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
-    folder_path = "S_3"
+    # reference_batches["Panel1"] = ["Panel2","Panel3"]
+    # reference_batches["Plate 19635 _CD8"] = ["Plate_29178_N", "Plate_36841", "Plate_39630_N"]
+    # ["Plate 27902_N", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
+    reference_batches["Plate 27902_N"] = ["Plate 19635 _CD8", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
+    # ["Plate 19635 _CD8", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
+    folder_path = "FINAL"
 
     if train_models:
         for directory in directories:
@@ -611,40 +613,40 @@ if __name__ == "__main__":
                 # for key, value in ref_batches_np.items():
                 #     reference_batches_data[key] = torch.tensor(value[:, 6:], dtype=torch.float32).to(device)
                 
-                # print("Computing Normalised Data Using Identity")
-                # normalised_batches = bnormalizer_ae_identity(model, x_tensor, reference_batches_data)
-                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                # make_dir_results("Id", directory)
-                # for key, value in normalised_batches.items():
-                #     np.save(f'./results/Id/{directory}/{key}.npy', value)
+                print("Computing Normalised Data Using Identity")
+                normalised_batches = bnormalizer_ae_identity(model, x_tensor, reference_batches_data)
+                normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                make_dir_results("Id", directory)
+                for key, value in normalised_batches.items():
+                    np.save(f'./results/Id/{directory}/{key}.npy', value)
 
-                # print("Computing Normalised Data Using Linear Shift")
-                # normalised_batches = bnormalizer_ae_linear(model, x_tensor, reference_batches_data)
-                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                # make_dir_results("LL", directory)
-                # for key, value in normalised_batches.items():
-                #     np.save(f'./results/LL/{directory}/{key}.npy', value)
+                print("Computing Normalised Data Using Linear Shift")
+                normalised_batches = bnormalizer_ae_linear(model, x_tensor, reference_batches_data)
+                normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                make_dir_results("LL", directory)
+                for key, value in normalised_batches.items():
+                    np.save(f'./results/LL/{directory}/{key}.npy', value)
 
-                # print("Computing Normalised Data Using SplineFn")
-                # normalised_batches = bnormalizer_ae_splinefn(model, x_tensor, reference_batches_data)
-                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                # make_dir_results("SplineFn", directory)
-                # for key, value in normalised_batches.items():
-                #     np.save(f'./results/SplineFn/{directory}/{key}.npy', value)
+                print("Computing Normalised Data Using SplineFn")
+                normalised_batches = bnormalizer_ae_splinefn(model, x_tensor, reference_batches_data)
+                normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                make_dir_results("SplineFn", directory)
+                for key, value in normalised_batches.items():
+                    np.save(f'./results/SplineFn/{directory}/{key}.npy', value)
 
-                # print("Computing Normalised Data Using ClusAlign")
-                # normalised_batches = bnormalizer_ae_kmeans(model, x_tensor, reference_batches_data)
-                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                # make_dir_results("ClusAlign", directory)
-                # for key, value in normalised_batches.items():
-                #     np.save(f'./results/ClusAlign/{directory}/{key}.npy', value)
+                print("Computing Normalised Data Using ClusAlign")
+                normalised_batches = bnormalizer_ae_kmeans(model, x_tensor, reference_batches_data)
+                normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                make_dir_results("ClusAlign", directory)
+                for key, value in normalised_batches.items():
+                    np.save(f'./results/ClusAlign/{directory}/{key}.npy', value)
                         
-                # print("Computing Normalised Data Using EmpBayes")
-                # normalised_batches = bnormalizer_ae_combat(model, x_tensor, reference_batches_data)
-                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                # make_dir_results("EmpBayes", directory)
-                # for key, value in normalised_batches.items():
-                #     np.save(f'./results/EmpBayes/{directory}/{key}.npy', value)
+                print("Computing Normalised Data Using EmpBayes")
+                normalised_batches = bnormalizer_ae_combat(model, x_tensor, reference_batches_data)
+                normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                make_dir_results("EmpBayes", directory)
+                for key, value in normalised_batches.items():
+                    np.save(f'./results/EmpBayes/{directory}/{key}.npy', value)
 
 
                 print(f"-------- FINISHED COMPUTING NORMALISED DATA FOR {directory} -----------")
