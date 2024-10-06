@@ -10,6 +10,7 @@ import platform
 from geomloss import SamplesLoss
 from sklearn.mixture import GaussianMixture
 from itertools import combinations
+import matplotlib.pyplot as plt
 
 from BNormalizer_AE_Id import bnormalizer_ae_identity
 from BNormalizer_AE_LL import bnormalizer_ae_linear
@@ -284,33 +285,6 @@ def get_main_cell_pops(data, k):
     return gmm.predict(data)
 
 
-def assign_clusters_and_compute_mse(pred_ae, cluster_centers, cluster_covs, batch_labels):
-    """
-    Assigns each row in pred_ae to the nearest cluster center, generates random points in the
-    neighborhood of the cluster center based on the covariance matrix, and computes the average MSE loss.
-    
-    Args:
-    pred_ae (torch.Tensor): 2D tensor of shape (n_samples, n_features)
-    cluster_centers (torch.Tensor): 2D tensor of shape (n_clusters, n_features)
-    cluster_covs (torch.Tensor): 3D tensor of shape (n_clusters, n_features, n_features)
-    batch_labels (torch.Tensor): 1D tensor of cluster assignments for each sample
-    
-    Returns:
-    torch.Tensor: Scalar tensor of average MSE loss across all samples
-    """
-    
-    # Get the assigned cluster centers and covariance matrices for each sample
-    assigned_centers = cluster_centers[batch_labels]
-
-    mean_diff_losses = []
-    for batch_label in batch_labels.unique():
-        mean_pred = pred_ae[batch_labels == batch_label].mean(dim=0)
-        mean_diff_losses.append(torch.mean((mean_pred - assigned_centers[batch_label]) ** 2))
-
-    # Compute simple MSE to cluster centers
-    return torch.mean(torch.stack(mean_diff_losses))
-
-
 ##################### SPREAD LOSS #####################
 def tvd_loss(pred, target, sinkhorn_distance, num_bins=200):
     # Get the number of columns (features)
@@ -519,18 +493,53 @@ def make_dir_results(method, directory):
             pass
 
 
+
+def generate_histogram(panel_np, index, min_val, max_val):
+    range = (min_val, max_val)
+
+    hist, _ = np.histogram(panel_np[:, index], bins=200, range=range)
+    hist = hist / np.sum(hist)
+    return hist
+
+def plot_histograms(panel_np_1):
+    num_channels = panel_np_1.shape[1]
+    
+    # Create a figure with subplots, one for each channel
+    fig, axs = plt.subplots(12, 1, figsize=(8, 2*num_channels))
+    
+    # If there's only one subplot, axs won't be an array, so wrap it in one
+    if num_channels == 1:
+        axs = [axs]
+    
+    for i, ax in enumerate(axs):
+        # Get the minimum and maximum values for scaling the histograms
+        min_val = np.min(panel_np_1[:, i+24])
+        max_val = np.max(panel_np_1[:, i+24])
+        
+        # Generate histogram for the current channel of panel_np_1
+        hist = generate_histogram(panel_np_1, i, min_val, max_val)
+        
+        # Plot the histogram on the current axis
+        ax.plot(hist)
+
+    # Adjust layout to prevent overlapping
+    plt.tight_layout()
+    plt.show()
+
+
+
 ##################### MAIN #####################
 if __name__ == "__main__":
     train_models = False
-    show_result = False
-    compute_normalise = True
+    show_result = True
+    compute_normalise = False
     # batches_to_run = ["Plate 19635 _CD8", "Plate 27902_N"]
     batches_to_run = ["Panel1"]
     reference_batches = dict()
     reference_batches["Panel1"] = ["Panel2","Panel3"]
     # reference_batches["Plate 19635 _CD8"] = ["Plate 27902_N", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
     # reference_batches["Plate 27902_N"] = ["Plate 19635 _CD8", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
-    folder_path = "FINAL"
+    folder_path = "S_3"
 
     if train_models:
         for directory in directories:
@@ -562,12 +571,13 @@ if __name__ == "__main__":
                 x = load_data(directory)
                 num_cols = x.shape[1]
 
-                # model = BNorm_AE(x.shape[1], 3)
-                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 24)
-                model.load_state_dict(torch.load(f'{folder_path}/model_{directory}.pt', map_location=device, weights_only=False))
+                model = BNorm_AE(x.shape[1], 3)
+                # model = BNorm_AE_Overcomplete(x.shape[1] - 6, 24)
+                model.load_state_dict(torch.load(f'{folder_path}/3.0_model_{directory}.pt', map_location=device, weights_only=False))
                 model = model.to(device)
 
-                x_tensor = torch.tensor(x[:, 6:], dtype=torch.float32).to(device)
+                x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
+                # x_tensor = torch.tensor(x[:, 6:], dtype=torch.float32).to(device)
 
                 x_transformed = model(x_tensor)[0].cpu().detach().numpy()  
                 x_transformed = np.hstack((x[:, :6], x_transformed))
@@ -589,14 +599,17 @@ if __name__ == "__main__":
 
                 x_tensor = torch.tensor(x[:, 6:], dtype=torch.float32).to(device)
 
+                latent = model.encode(x_tensor).cpu().detach().numpy()
 
-                ref_batches_np = dict()
-                for ref_batch in reference_batches[directory]:
-                    ref_batches_np[ref_batch] = load_data(ref_batch, load_full=True)
+                plot_histograms(latent)
 
-                reference_batches_data = dict()
-                for key, value in ref_batches_np.items():
-                    reference_batches_data[key] = torch.tensor(value[:, 6:], dtype=torch.float32).to(device)
+                # ref_batches_np = dict()
+                # for ref_batch in reference_batches[directory]:
+                #     ref_batches_np[ref_batch] = load_data(ref_batch, load_full=True)
+
+                # reference_batches_data = dict()
+                # for key, value in ref_batches_np.items():
+                #     reference_batches_data[key] = torch.tensor(value[:, 6:], dtype=torch.float32).to(device)
                 
                 # print("Computing Normalised Data Using Identity")
                 # normalised_batches = bnormalizer_ae_identity(model, x_tensor, reference_batches_data)
