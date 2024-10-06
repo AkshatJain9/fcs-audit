@@ -42,7 +42,7 @@ def graph_all_mixed_losses(name):
     npy_files = []
     for root, dirs, files in os.walk('.'):
         # Exclude directories with 'W' in their name
-        dirs[:] = [d for d in dirs if 'W_3' in d]
+        dirs[:] = [d for d in dirs if 'S_3' in d]
         for file in files:
             # Check if the file is a .npy file and contains the given name
             if file.endswith('.npy') and name in file:
@@ -54,33 +54,43 @@ def graph_all_mixed_losses(name):
     
     plt.figure(figsize=(12, 6))  # Initialize the figure with a larger size
     for file in npy_files:
+        print(file)
+        if ("./S_3/losses_Panel1.npy" != file):
+            continue
+        
         loss_arr = np.load(file)  # Load each .npy file
+        if (loss_arr.shape[1] > 200):
+            continue
         label = os.path.basename(os.path.dirname(file))
 
-        if (platform.system() == 'Windows'):
-            p_value = float(file.split('\\')[2].split("_")[0]) / 10
-        else:
-            p_value = float(file.split('/')[2].split("_")[0]) / 10
+        # if (platform.system() == 'Windows'):
+        #     p_value = float(file.split('\\')[2].split("_")[0]) / 10
+        # else:
+        #     p_value = float(file.split('/')[2].split("_")[0]) / 10
+
+        p_value = 0.3
         
-        total_loss = loss_arr[0]
-        mse_loss = loss_arr[1] / p_value
-        tvd_loss = loss_arr[2] / (1 - p_value)
+        
+        mse_loss = loss_arr[1] / 0.27
+        tvd_loss = loss_arr[2] / 0.63
+        total_loss = mse_loss + tvd_loss
 
         if (len(loss_arr) > 3):
-            cluster_align_loss = loss_arr[3]
-            plt.plot(cluster_align_loss, label=f'{label} - Cluster Align')
+            cluster_align_loss = loss_arr[3] / 0.1
+            total_loss += cluster_align_loss
+            plt.plot(cluster_align_loss, label=f'{label} - Topological Loss')
 
         # Use the parent directory name as the label
         
-        # plt.plot(total_loss, label=f'{label} - Total Loss, p={p_value}')
-        # plt.plot(mse_loss, label=f'{label} - MSE Loss, p={p_value}')
+        plt.plot(total_loss, label=f'{label} - Total Loss, p={p_value}')
+        plt.plot(mse_loss, label=f'{label} - MSE Loss, p={p_value}')
         plt.plot(tvd_loss, label=f'{label} - Histogram Loss, p={p_value}')
 
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.title(f'Loss per unit over epochs for files containing "{name}"')
     plt.legend()  # Add a legend to differentiate the curves
-    plt.ylim(0, 0.000004)  # Set y-axis limits (adjust the values as needed)
+    plt.ylim(0, 0.0001)  # Set y-axis limits (adjust the values as needed)
     plt.tight_layout()  # Adjust the layout to prevent cutting off labels
     plt.show()
     

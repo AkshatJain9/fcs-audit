@@ -181,8 +181,8 @@ def train_model(model: nn.Module,
             latent = output[1]
             
             # Calculate MSE and Sinkhorn loss
-            mse_loss_ae = mse_loss(pred_ae, x)
-            tvd_loss_val = tvd_loss(pred_ae, x, sinkhorn_distance)
+            mse_loss_ae = mse_loss(pred_ae, x[:, 6:])
+            tvd_loss_val = tvd_loss(pred_ae, x[:, 6:], sinkhorn_distance)
             cluster_align_loss = vr_complex_loss_clusters(x, latent, batch[1])
 
             total_loss_ae = 0.3 * mse_loss_ae + 0.7 * tvd_loss_val
@@ -366,7 +366,7 @@ def load_data(panel: str, load_full: bool = False) -> np.ndarray:
         return np.load(somepath + panel + ".npy")
     
     full_dir = somepath + "full" + ("/" if platform.system() != "Windows" else "\\")
-    if (load_data and os.path.exists(full_dir + panel + ".npy")):
+    if (load_full and os.path.exists(full_dir + panel + ".npy")):
         return np.load(full_dir + panel + ".npy")
 
     if (platform.system() == "Windows"):
@@ -530,9 +530,9 @@ def plot_histograms(panel_np_1):
 
 ##################### MAIN #####################
 if __name__ == "__main__":
-    train_models = False
+    train_models = True
     show_result = False
-    compute_normalise = True
+    compute_normalise = False
     # batches_to_run = ["Plate 27902_N"]
     batches_to_run = ["Panel1"]
     reference_batches = dict()
@@ -541,7 +541,7 @@ if __name__ == "__main__":
     # ["Plate 27902_N", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
     # reference_batches["Plate 27902_N"] = ["Plate 19635 _CD8", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
     # ["Plate 19635 _CD8", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
-    folder_path = "FINAL"
+    folder_path = "S_3"
 
     if train_models:
         for directory in directories:
@@ -551,16 +551,16 @@ if __name__ == "__main__":
                 x = load_data(directory)
                 ref_labels = get_main_cell_pops(x[:, 6:], get_clusters(directory))
 
-                # data = get_dataloader(x, ref_labels, 8196)
-                # model = BNorm_AE(x.shape[1], 3)
+                data = get_dataloader(x, ref_labels, 1024)
+                model = BNorm_AE(x.shape[1], 3)
 
-                data = get_dataloader(x[:, 6:], ref_labels, 1024)
-                model = BNorm_AE_Overcomplete(x.shape[1] - 6, 24)
+                # data = get_dataloader(x[:, 6:], ref_labels, 1024)
+                # model = BNorm_AE_Overcomplete(x.shape[1] - 6, 24)
 
-                # model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
-                # model = model.to(device)
+                model.load_state_dict(torch.load(f'S_3/3.0_model_{directory}.pt', map_location=device))
+                model = model.to(device)
 
-                model, losses = train_model(model, data, 500, 0.0001)
+                model, losses = train_model(model, data, 200, 0.0001)
                 np.save(f'{folder_path}/losses_{directory}.npy', losses)
                 torch.save(model.state_dict(), f'{folder_path}/model_{directory}.pt')
                 print(f"-------- FINISHED TRAINING FOR {directory} -----------")
