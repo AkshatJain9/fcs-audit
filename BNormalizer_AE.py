@@ -513,8 +513,8 @@ def plot_histograms(panel_np_1):
     
     for i, ax in enumerate(axs):
         # Get the minimum and maximum values for scaling the histograms
-        min_val = np.min(panel_np_1[:, i+24])
-        max_val = np.max(panel_np_1[:, i+24])
+        min_val = np.min(panel_np_1[:, i])
+        max_val = np.max(panel_np_1[:, i])
         
         # Generate histogram for the current channel of panel_np_1
         hist = generate_histogram(panel_np_1, i, min_val, max_val)
@@ -530,13 +530,13 @@ def plot_histograms(panel_np_1):
 
 ##################### MAIN #####################
 if __name__ == "__main__":
-    train_models = True
+    train_models = False
     show_result = False
-    compute_normalise = False
+    compute_normalise = True
     # batches_to_run = ["Plate 27902_N"]
     batches_to_run = ["Panel1"]
     reference_batches = dict()
-    # reference_batches["Panel1"] = ["Panel2","Panel3"]
+    reference_batches["Panel1"] = ["Panel2"]
     # reference_batches["Plate 19635 _CD8"] = ["Plate_29178_N", "Plate_36841", "Plate_39630_N"]
     # ["Plate 27902_N", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
     # reference_batches["Plate 27902_N"] = ["Plate 19635 _CD8", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
@@ -602,16 +602,19 @@ if __name__ == "__main__":
                 x_tensor = torch.tensor(x[:, 6:], dtype=torch.float32).to(device)
 
                 latent = model.encode(x_tensor).cpu().detach().numpy()
+                np.save(f'./Panel1_latent.npy', latent)
+                assert False
 
                 plot_histograms(latent)
 
-                # ref_batches_np = dict()
-                # for ref_batch in reference_batches[directory]:
-                #     ref_batches_np[ref_batch] = load_data(ref_batch, load_full=True)
 
-                # reference_batches_data = dict()
-                # for key, value in ref_batches_np.items():
-                #     reference_batches_data[key] = torch.tensor(value[:, 6:], dtype=torch.float32).to(device)
+                ref_batches_np = dict()
+                for ref_batch in reference_batches[directory]:
+                    ref_batches_np[ref_batch] = load_data(ref_batch, load_full=True)
+
+                reference_batches_data = dict()
+                for key, value in ref_batches_np.items():
+                    reference_batches_data[key] = torch.tensor(value[:, 6:], dtype=torch.float32).to(device)
                 
                 # print("Computing Normalised Data Using Identity")
                 # normalised_batches = bnormalizer_ae_identity(model, x_tensor, reference_batches_data)
@@ -641,12 +644,12 @@ if __name__ == "__main__":
                 # for key, value in normalised_batches.items():
                 #     np.save(f'./results/ClusAlign/{directory}/{key}.npy', value)
                         
-                # print("Computing Normalised Data Using EmpBayes")
-                # normalised_batches = bnormalizer_ae_combat(model, x_tensor, reference_batches_data)
-                # normalised_batches = recombine_data(ref_batches_np, normalised_batches)
-                # make_dir_results("EmpBayes", directory)
-                # for key, value in normalised_batches.items():
-                #     np.save(f'./results/EmpBayes/{directory}/{key}.npy', value)
+                print("Computing Normalised Data Using EmpBayes")
+                normalised_batches = bnormalizer_ae_combat(model, x_tensor, reference_batches_data)
+                normalised_batches = recombine_data(ref_batches_np, normalised_batches)
+                make_dir_results("EmpBayes", directory)
+                for key, value in normalised_batches.items():
+                    np.save(f'./results/EmpBayes/{directory}/{key}.npy', value)
 
 
                 print(f"-------- FINISHED COMPUTING NORMALISED DATA FOR {directory} -----------")

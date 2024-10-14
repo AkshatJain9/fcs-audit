@@ -110,6 +110,7 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
     
     adjusted_target_batches = {}
     for key, target_batch_encoded in target_batches_encoded.items():
+        np.save(f"target_batch_encoded_{key}.npy", target_batch_encoded)
         target_batch_shifted = np.copy(target_batch_encoded)
         # Do a simple linear shift before storing the adjusted target batch
         target_batch_shifted = ((target_batch_shifted - np.mean(target_batch_shifted, axis=0)) / np.std(target_batch_shifted, axis=0)) * np.std(ref_batch_encoded, axis=0) + np.mean(ref_batch_encoded, axis=0)
@@ -143,12 +144,14 @@ def bnormalizer_ae_combat(bnormalizer: nn.Module, ref_batch: torch.Tensor, targe
 
         # visualize_gmms_on_ref(target_batch_encoded, target_batch_gmms)
         # Store the shifted (adjusted) target batch
+        np.save(f"target_batch_shifted_{key}.npy", target_batch_shifted)
         adjusted_target_batches[key] = target_batch_shifted
 
     # Plot histograms for comparison (optional step for debugging or visualization)
     # for key, target_batch_encoded in adjusted_target_batches.items():
     #     plot_all_histograms(ref_batch_encoded, target_batch_encoded)
 
+    assert False
     normalised_batches = {}
     for key, target_batch_encoded in adjusted_target_batches.items():
         normalised_batches[key] = bnormalizer.decode(torch.Tensor(target_batch_encoded).to(device)).detach().cpu().numpy()
