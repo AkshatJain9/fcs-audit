@@ -534,9 +534,9 @@ if __name__ == "__main__":
     show_result = False
     compute_normalise = True
     # batches_to_run = ["Plate 27902_N"]
-    batches_to_run = ["Panel1"]
+    batches_to_run = ["Plate 19635 _CD8"]
     reference_batches = dict()
-    reference_batches["Panel1"] = ["Panel2"]
+    reference_batches["Plate 19635 _CD8"] = ["Plate 27902_N"]
     # reference_batches["Plate 19635 _CD8"] = ["Plate_29178_N", "Plate_36841", "Plate_39630_N"]
     # ["Plate 27902_N", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
     # reference_batches["Plate 27902_N"] = ["Plate 19635 _CD8", "Plate_28332", "Plate_28528_N", "Plate_29178_N", "Plate_36841", "Plate_39630_N"]
@@ -602,7 +602,19 @@ if __name__ == "__main__":
                 x_tensor = torch.tensor(x[:, 6:], dtype=torch.float32).to(device)
 
                 latent = model.encode(x_tensor).cpu().detach().numpy()
-                np.save(f'./Panel1_latent.npy', latent)
+                np.save(f'./ref.npy', latent)
+
+
+                for bt in reference_batches[directory]:
+                    x = load_data(bt, load_full=True)
+                    num_cols = x.shape[1]
+
+                    x_tensor = torch.tensor(x[:, 6:], dtype=torch.float32).to(device)
+
+                    latent = model.encode(x_tensor).cpu().detach().numpy()
+                    np.save(f'./{bt}.npy', latent)
+
+                    
                 assert False
 
                 plot_histograms(latent)
